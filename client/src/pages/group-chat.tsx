@@ -464,12 +464,12 @@ export default function GroupChat() {
               {selectedPoll.description && (
                 <p className="text-sm">{selectedPoll.description}</p>
               )}
-              {selectedPoll.metadata && (
+              {selectedPoll.metadata && typeof selectedPoll.metadata === 'object' && (
                 <div className="text-sm space-y-1">
                   {Object.entries(selectedPoll.metadata as Record<string, any>).map(([key, value]) => (
                     <p key={key}>
-                      <span className="font-medium capitalize">{key}: </span>
-                      {String(value)}
+                      <span className="font-medium capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}: </span>
+                      {Array.isArray(value) ? value.join(', ') : String(value)}
                     </p>
                   ))}
                 </div>
