@@ -2,6 +2,12 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
+// Ensure critical environment variables are set in production
+if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
+  console.error("ERROR: SESSION_SECRET environment variable must be set in production");
+  process.exit(1);
+}
+
 const app = express();
 
 declare module 'http' {

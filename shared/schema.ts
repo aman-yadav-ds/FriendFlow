@@ -45,7 +45,9 @@ export const groupMembers = pgTable("group_members", {
   groupId: varchar("group_id").notNull().references(() => groups.id, { onDelete: "cascade" }),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   joinedAt: timestamp("joined_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  uniqueGroupUser: sql`CONSTRAINT unique_group_user UNIQUE (${table.groupId}, ${table.userId})`,
+}));
 
 // Messages table
 export const messages = pgTable("messages", {

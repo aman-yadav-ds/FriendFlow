@@ -72,10 +72,17 @@ export default function GroupChat() {
   useEffect(() => {
     // Connect to WebSocket for real-time updates
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    ws.current = new WebSocket(`${protocol}//${window.location.host}`);
+    ws.current = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
     ws.current.onopen = () => {
-      ws.current?.send(JSON.stringify({ type: "join", groupId }));
+      // Authenticate with userId first
+      if (user?.id) {
+        ws.current?.send(JSON.stringify({ type: "auth", userId: user.id }));
+        // Then join the group
+        setTimeout(() => {
+          ws.current?.send(JSON.stringify({ type: "join", groupId }));
+        }, 100);
+      }
     };
 
     ws.current.onmessage = (event) => {

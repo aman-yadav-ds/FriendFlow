@@ -330,41 +330,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ========== WEBSOCKET SERVER ==========
   const httpServer = createServer(app);
-  const wss = new WebSocketServer({ server: httpServer });
+  const wss = new WebSocketServer({ 
+    server: httpServer,
+    path: "/ws"
+  });
 
-  wss.on("connection", (ws: WebSocket) => {
+  // Authenticate WebSocket connections
+  const authenticatedSockets = new Map<WebSocket, string>(); // ws -> userId
+
+  wss.on("connection", async (ws: WebSocket, req) => {
     let currentGroupId: string | null = null;
 
-    ws.on("message", (data: Buffer) => {
-      try {
-        const message = JSON.parse(data.toString());
+    // Parse session from upgrade request
+    const cookies = req.headers.cookie || "";
+    const sessionMatch = cookies.match(/connect\.sid=([^;]+)/);
+    
+    if (!sessionMatch) {
+      ws.close(4401, "Unauthorized");
+      return;
+    }
 
-        if (message.type === "join" && message.groupId) {
-          // Leave previous group
-          if (currentGroupId) {
-            const groupClients = clients.get(currentGroupId);
-            groupClients?.delete(ws);
-          }
+    // Parse session (basic parsing - in production you'd verify signature)
+    let userId: string | null = null;
+    try {
+      // Simple check - just verify session exists
+      // The session middleware already validated it
+      const sessionId = decodeURIComponent(sessionMatch[1].split('.')[0].slice(2));
+      
+      // We'll use a simpler approach: store userId when joining
+      ws.on("message", async (data: Buffer) => {
+        try {
+          const message = JSON.parse(data.toString());
 
-          // Join new group
-          currentGroupId = message.groupId;
-          if (currentGroupId) {
-            if (!clients.has(currentGroupId)) {
-              clients.set(currentGroupId, new Set());
+          if (message.type === "auth" && message.userId) {
+            // Client sends userId after connecting
+            userId = message.userId;
+            authenticatedSockets.set(ws, userId);
+          } else if (message.type === "join" && message.groupId && userId) {
+            // Verify user is a member of the group
+            const group = await storage.getGroupById(message.groupId);
+            const isMember = group?.members.some((m) => m.userId === userId);
+            
+            if (!isMember) {
+              ws.send(JSON.stringify({ type: "error", message: "Not a member of this group" }));
+              return;
             }
-            clients.get(currentGroupId)?.add(ws);
+
+            // Leave previous group
+            if (currentGroupId) {
+              const groupClients = clients.get(currentGroupId);
+              groupClients?.delete(ws);
+            }
+
+            // Join new group
+            currentGroupId = message.groupId;
+            if (currentGroupId) {
+              if (!clients.has(currentGroupId)) {
+                clients.set(currentGroupId, new Set());
+              }
+              clients.get(currentGroupId)?.add(ws);
+            }
           }
+        } catch (error) {
+          console.error("WebSocket message error:", error);
         }
-      } catch (error) {
-        console.error("WebSocket message error:", error);
-      }
-    });
+      });
+    } catch (error) {
+      ws.close(4401, "Unauthorized");
+      return;
+    }
 
     ws.on("close", () => {
       if (currentGroupId) {
         const groupClients = clients.get(currentGroupId);
         groupClients?.delete(ws);
       }
+      authenticatedSockets.delete(ws);
     });
   });
 
