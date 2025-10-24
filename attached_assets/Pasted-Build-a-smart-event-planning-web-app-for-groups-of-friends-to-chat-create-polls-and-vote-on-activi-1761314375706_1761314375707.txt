@@ -1,0 +1,117 @@
+Build a smart event planning web app for groups of friends to chat, create polls, and vote on activities like watching a movie or going out.
+The app must be built using Next.js + Appwrite, have a modern, aesthetic design, be responsive, and feature smooth animations.
+
+💻 Tech Stack
+
+Frontend: Next.js 15 (App Router) + TypeScript
+
+Styling: Tailwind CSS + ShadCN/UI (for polished UI)
+
+Animations: Framer Motion
+
+State Management: Zustand
+
+Forms: React Hook Form + Zod
+
+Icons & Emojis: Lucide React + Emoji Mart
+
+Notifications: Sonner or React Hot Toast
+
+Themes: next-themes (dark/light)
+
+Backend (ONLY): Appwrite
+
+Authentication (Appwrite Auth)
+
+Database (Appwrite Collections)
+
+File Storage (avatars, poll images)
+
+Realtime updates (chat, voting, group activity)
+
+External APIs:
+
+TMDB API (for movie details)
+
+Google Places API (for place details)
+
+Deployment:
+
+Frontend → Vercel
+
+Backend → Appwrite Cloud or self-hosted
+
+🔐 Environment Configuration
+
+All API keys and Appwrite credentials must be listed in .env.local for easy editing later.
+Example:
+
+NEXT_PUBLIC_APPWRITE_PROJECT_ID=
+NEXT_PUBLIC_APPWRITE_ENDPOINT=
+TMDB_API_KEY=
+GOOGLE_PLACES_API_KEY=
+
+
+Use these environment variables throughout the app for authentication, API fetches, and configuration.
+
+🗂️ App Pages / Routes
+
+/auth/register – Registration page using Appwrite Auth.
+
+/auth/login – Login with email/password (Appwrite).
+
+/dashboard – User dashboard showing all joined groups and create new group option.
+
+/groups/[groupId] –
+
+Group chat with real-time updates (Appwrite Realtime).
+
+Embedded polls and emoji reactions.
+
+Group info sidebar (members, invite link).
+
+/groups/[groupId]/poll –
+
+Poll creation form: choose type (Movie / Place).
+
+Fetch details via TMDB or Google Places API.
+
+Display poll card with image + “Join / Maybe / Not Joining” voting buttons.
+
+Modal popup for full movie/place details.
+
+/profile – View/edit user profile (name, avatar, bio).
+
+🧩 Core Components
+
+PollCard.tsx – Displays poll image, title, and voting buttons.
+
+ChatMessage.tsx – Chat bubble UI with emoji reactions.
+
+GroupList.tsx – Shows all user groups.
+
+EmojiPicker.tsx – Emoji Mart component for reactions.
+
+PollModal.tsx – Modal for viewing movie/place details.
+
+GroupHeader.tsx – Group title + members + invite link.
+
+VoteCount.tsx – Live vote tally (Join / Maybe / No).
+
+🧱 Appwrite Database Collections
+
+Users → name, email, avatar, bio
+
+Groups → name, members[], inviteLink
+
+Messages → groupId, senderId, text, timestamp, pollId (nullable)
+
+Polls → groupId, createdBy, type (“movie” / “place”), externalId, title, image, votes[]
+
+All chat messages, user data, polls, and group data must be stored and fetched only from Appwrite Database.
+
+✨ Goal
+
+Deliver a real-time, beautifully animated event planner app using Next.js + Appwrite only for all backend needs (auth, chat, storage, realtime).
+All API keys and credentials must be editable via .env.local.
+App should look clean, friendly, and work seamlessly on mobile and desktop.
