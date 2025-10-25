@@ -8,6 +8,7 @@ export default defineConfig({
     react(),
     runtimeErrorOverlay(),
   ],
+  assetsInclude: ['**/*.html'],
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),

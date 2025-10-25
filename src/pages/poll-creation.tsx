@@ -88,45 +88,20 @@ export default function PollCreation() {
   };
 
   const searchPlaces = async () => {
-    if (!searchQuery.trim()) return;
-    
-    if (!GOOGLE_PLACES_API_KEY) {
-      toast({
-        variant: "destructive",
-        title: "Configuration Error",
-        description: "Google Places API key is not configured",
-      });
-      return;
-    }
+    if (!searchQuery.trim()) return [];
 
-    setIsSearching(true);
     try {
-      const response = await fetch(
-        `${GOOGLE_PLACES_BASE_URL}/textsearch/json?query=${encodeURIComponent(searchQuery)}&key=${GOOGLE_PLACES_API_KEY}`
-      );
-      
-      if (!response.ok) {
-        throw new Error("Failed to search places");
-      }
-      
+      const response = await fetch(`/api/places?query=${encodeURIComponent(searchQuery)}`);
+      if (!response.ok) throw new Error("Failed to fetch places");
+
       const data = await response.json();
-      
-      if (data.status !== "OK" && data.status !== "ZERO_RESULTS") {
-        throw new Error(data.error_message || "Places search failed");
-      }
-      
-      setPlaceResults(data.results || []);
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Search failed",
-        description: "Could not search places. Please try again.",
-      });
-      console.error("Places search error:", error);
-    } finally {
-      setIsSearching(false);
+      return data.results || [];
+    } catch (err) {
+      console.error("Error fetching places:", err);
+      return [];
     }
-  };
+  }
+
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
