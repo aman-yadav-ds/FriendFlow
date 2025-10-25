@@ -32,11 +32,11 @@ export interface AppwriteUser {
 // Auth helpers
 export const getCurrentUser = async (): Promise<Models.User<Models.Preferences> | null> => {
   try {
-    // account.get() returns the full Models.User<Models.Preferences> object
+    const jwt = localStorage.getItem("appwrite_jwt");
+    if (jwt) client.setJWT(jwt);
     const user = await account.get();
     return user;
-  } catch (error) {
-    // Return null if no user is found
+  } catch {
     return null;
   }
 };
@@ -45,11 +45,15 @@ export const getCurrentUser = async (): Promise<Models.User<Models.Preferences> 
 export const login = async (email: string, password: string) => {
   try {
     await account.createEmailPasswordSession(email, password);
+    const jwt = await account.createJWT();
+    localStorage.setItem("appwrite_jwt", jwt.jwt);
+    client.setJWT(jwt.jwt);
     return await getCurrentUser();
   } catch (error) {
     throw error;
   }
 };
+
 
 export const register = async (email: string, password: string, name: string) => {
   try {
@@ -64,7 +68,6 @@ export const register = async (email: string, password: string, name: string) =>
 export const logout = async () => {
   try {
     await account.deleteSession("current");
-  } catch (error) {
-    throw error;
-  }
+  } catch {}
+  localStorage.removeItem("appwrite_jwt");
 };
