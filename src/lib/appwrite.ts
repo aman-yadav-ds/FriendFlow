@@ -1,5 +1,5 @@
 // lib/appwrite.ts
-import { Client, Databases, Account } from "appwrite";
+import { Client, Databases, Account, Models } from "appwrite";
 
 // Initialize Appwrite Client
 export const client = new Client()
@@ -29,19 +29,17 @@ export interface AppwriteUser {
 }
 
 // Auth helpers
-export const getCurrentUser = async (): Promise<AppwriteUser | null> => {
+export const getCurrentUser = async (): Promise<Models.User<Models.Preferences> | null> => {
   try {
+    // account.get() returns the full Models.User<Models.Preferences> object
     const user = await account.get();
-    return {
-      $id: user.$id,
-      name: user.name,
-      email: user.email,
-      avatar: user.prefs?.avatar,
-    };
+    return user;
   } catch (error) {
+    // Return null if no user is found
     return null;
   }
 };
+
 
 export const login = async (email: string, password: string) => {
   try {

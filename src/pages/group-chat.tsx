@@ -58,6 +58,7 @@ interface Message {
   createdAt: string;
   reactions?: Array<{ userId: string; emoji: string }>;
   pollId?: string;
+  isSystemMessage?: boolean; // <-- ADDED
 }
 
 interface Poll {
@@ -127,7 +128,7 @@ export default function GroupChat() {
     if (groupId) {
       fetchGroup();
     }
-  }, [groupId]);
+  }, [groupId, toast]); // Added toast to dependency array
 
   // Fetch messages
   useEffect(() => {
@@ -284,6 +285,7 @@ export default function GroupChat() {
           senderAvatar: currentUser.avatar || "",
           text: message,
           reactions: [],
+          isSystemMessage: false, // <-- ADDED
         }
       );
       setMessage("");
@@ -376,11 +378,11 @@ export default function GroupChat() {
 
   const handleCopyInvite = () => {
     if (!group?.inviteCode) return;
-    const inviteLink = `${window.location.origin}/invite/${group.inviteCode}`;
+    const inviteLink = `${group.inviteCode}`;
     navigator.clipboard.writeText(inviteLink);
     toast({
-      title: "Invite link copied!",
-      description: "Share this link with your friends",
+      title: "Invite code copied!",
+      description: "Share this code with your friends",
     });
   };
 
@@ -434,7 +436,7 @@ export default function GroupChat() {
             data-testid="button-invite"
           >
             <Copy className="h-4 w-4 mr-2" />
-            Invite
+            Copy Invite Code
           </Button>
           <Button
             variant="ghost"
@@ -478,7 +480,25 @@ export default function GroupChat() {
                   {messages.map((msg, index) => {
                     const isOwn = msg.senderId === currentUser.$id;
                     const showAvatar = index === 0 || messages[index - 1].senderId !== msg.senderId;
+                    const isSystem = msg.isSystemMessage === true; // <-- NEW
+
+                    // --- NEW: Render System Messages ---
+                    if (isSystem) {
+                      return (
+                        <motion.div
+                          key={msg.$id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="flex justify-center my-2"
+                        >
+                          <div className="text-xs text-muted-foreground bg-card px-3 py-1 rounded-full shadow-sm">
+                            {msg.text}
+                          </div>
+                        </motion.div>
+                      );
+                    }
                     
+                    // --- Regular Message Render ---
                     return (
                       <motion.div
                         key={msg.$id}

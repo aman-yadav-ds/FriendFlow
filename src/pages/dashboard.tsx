@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { account, databases } from "@/lib/appwrite";
-import { Permission, Query, Role } from "appwrite"; // for convenience
+import { Permission, Query, Role, ID } from "appwrite"; // Added ID
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,7 @@ import { motion } from "framer-motion";
 
 const DATABASE_ID = import.meta.env.VITE_APPWRITE_DATABASE_ID!;
 const COLLECTION_ID = "groups";
+const COLLECTION_ID_MESSAGES = "messages"; // Added for system messages
 
 interface Group {
   $id: string;
@@ -25,6 +26,7 @@ interface Group {
   lastMessage?: string;
   activeMembers?: string[];
   unseenMessages?: number;
+  inviteCode?: string; // Added for typing
 }
 
 
@@ -39,6 +41,11 @@ export default function Dashboard() {
   const [newGroupName, setNewGroupName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+
+  // --- New State for Joining Groups ---
+  const [joinDialogOpen, setJoinDialogOpen] = useState(false);
+  const [joinInviteCode, setJoinInviteCode] = useState("");
+  const [isJoining, setIsJoining] = useState(false);
 
   // Fetch all groups that the user has read access to
   const fetchGroups = async () => {
@@ -86,7 +93,7 @@ export default function Dashboard() {
   // Create a new group
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newGroupName.trim()) return;
+    if (!newGroupName.trim() || !user) return; // Added user check
 
     setIsCreating(true);
     try {
@@ -102,10 +109,17 @@ export default function Dashboard() {
           lastMessage: JSON.stringify({ text: "", timestamp: Date.now() }),
           inviteCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
         },
+        // --- PERMISSIONS MODIFIED ---
+        // This is required for your "Join Group" flow to work client-side.
+        // 1. (Read) Any authenticated user can find this group by its invite code.
+        // 2. (Update) Any authenticated user can update this doc (e.g., add themselves to the 'members' array).
+        // 3. (Delete) Only the creator can delete the group.
+        // A more secure way would use an Appwrite Function for joining,
+        // which avoids giving global update permission.
         [
-          Permission.write(Role.user(user!.$id)), // allow anyone to find the group
-          Permission.read(Role.user(user!.$id)),  // allow this user to read
-          Permission.update(Role.user(user!.$id)) // allow this user to update/delete
+          Permission.read(Role.users()),
+          Permission.update(Role.users()),
+          Permission.delete(Role.user(user!.$id)),
         ]
       );
 
@@ -125,6 +139,87 @@ export default function Dashboard() {
       setIsCreating(false);
     }
   };
+
+  // --- New Function to Join a Group ---
+  const handleJoinGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!joinInviteCode.trim() || !user) return;
+
+    setIsJoining(true);
+    try {
+      // 1. Find the group by invite code
+      const response = await databases.listDocuments(
+        DATABASE_ID,
+        COLLECTION_ID,
+        [
+          Query.equal("inviteCode", joinInviteCode.trim().toUpperCase()),
+          Query.limit(1)
+        ]
+      );
+
+      if (response.total === 0) {
+        throw new Error("Group not found. Check the code and try again.");
+      }
+
+      const group = response.documents[0] as unknown as Group;
+
+      // 2. Check if already a member
+      if (group.members.includes(user.$id)) {
+        toast({
+          variant: "default",
+          title: "You're already in this group!",
+        });
+        setJoinDialogOpen(false);
+        setJoinInviteCode("");
+        return;
+      }
+
+      // 3. Add user to members array and update the doc
+      const newMembers = [...group.members, user.$id];
+      await databases.updateDocument(
+        DATABASE_ID,
+        COLLECTION_ID,
+        group.$id,
+        {
+          members: newMembers,
+        }
+      );
+
+      // 4. Post a system message to the group
+      await databases.createDocument(
+        DATABASE_ID,
+        COLLECTION_ID_MESSAGES,
+        ID.unique(),
+        {
+          groupId: group.$id,
+          senderId: "system",
+          senderName: "System",
+          text: `${user.name} has joined the group.`,
+          isSystemMessage: true, // Mark as system message
+        }
+      );
+
+      toast({
+        title: "Joined group!",
+        description: `You are now a member of ${group.name}.`,
+      });
+      
+      setJoinInviteCode("");
+      setJoinDialogOpen(false);
+      fetchGroups(); // Refresh the user's group list
+
+    } catch (err) {
+      console.error("Error joining group:", err);
+      toast({
+        variant: "destructive",
+        title: "Failed to join group",
+        description: err instanceof Error ? err.message : "Please try again",
+      });
+    } finally {
+      setIsJoining(false);
+    }
+  };
+
 
   const handleDeleteGroup = async (groupId: string) => {
     try {
@@ -208,41 +303,83 @@ export default function Dashboard() {
               className="pl-10"
             />
           </div>
-          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                New Group
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Create New Group</DialogTitle>
-                <DialogDescription>
-                  Start a new group to plan events with your friends
-                </DialogDescription>
-              </DialogHeader>
-              <form onSubmit={handleCreateGroup}>
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="groupName">Group Name</Label>
-                    <Input
-                      id="groupName"
-                      placeholder="Weekend Warriors, Movie Night, etc."
-                      value={newGroupName}
-                      onChange={(e) => setNewGroupName(e.target.value)}
-                      required
-                    />
+
+          {/* --- Updated Button Container --- */}
+          <div className="flex gap-2">
+            {/* --- Join Group Dialog --- */}
+            <Dialog open={joinDialogOpen} onOpenChange={setJoinDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <Users className="mr-2 h-4 w-4" />
+                  Join Group
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Join a Group</DialogTitle>
+                  <DialogDescription>
+                    Enter the invite code you received from a friend.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleJoinGroup}>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="inviteCode">Invite Code</Label>
+                      <Input
+                        id="inviteCode"
+                        placeholder="ABC123"
+                        value={joinInviteCode}
+                        onChange={(e) => setJoinInviteCode(e.target.value)}
+                        required
+                      />
+                    </div>
                   </div>
-                </div>
-                <DialogFooter>
-                  <Button type="submit" disabled={isCreating}>
-                    {isCreating ? "Creating..." : "Create Group"}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
+                  <DialogFooter>
+                    <Button type="submit" disabled={isJoining}>
+                      {isJoining ? "Joining..." : "Join Group"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+
+            {/* --- New Group Dialog --- */}
+            <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+              <DialogTrigger asChild>
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  New Group
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create New Group</DialogTitle>
+                  <DialogDescription>
+                    Start a new group to plan events with your friends
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleCreateGroup}>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="groupName">Group Name</Label>
+                      <Input
+                        id="groupName"
+                        placeholder="Weekend Warriors, Movie Night, etc."
+                        value={newGroupName}
+                        onChange={(e) => setNewGroupName(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button type="submit" disabled={isCreating}>
+                      {isCreating ? "Creating..." : "Create Group"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
 
         {/* Groups Grid */}
@@ -272,7 +409,7 @@ export default function Dashboard() {
                       </div>
                     )}
 
-                    <CardHeader className="flex justify-between items-start pb-2">
+                    <CardHeader className="flex flex-row justify-between items-start pb-2">
                       <div>
                         <CardTitle className="text-lg font-semibold flex items-center gap-2">
                           <Users className="h-4 w-4 text-primary" />
