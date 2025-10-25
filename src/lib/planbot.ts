@@ -2,6 +2,7 @@
 import { ID, Query } from "appwrite";
 import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/appwrite";
 import { createPoll, getPollVotes, getActivePoll, deactivatePoll } from "@/lib/pollHelpers";
+import { extractCafePreferencesFromChat, rerankPlacesWithLLM, summarizeItinerary } from "@/lib/llm";
 
 export interface PlanbotContext {
   groupId: string;
@@ -54,7 +55,22 @@ async function suggestCafes(groupId: string, queryWords: string[]): Promise<void
       return;
     }
 
-    const top = data.results.slice(0, 3);
+    // LLM preference extraction from recent chat
+    let reranked = data.results;
+    try {
+      const recentMsgsRes = await databases.listDocuments(
+        DATABASE_ID,
+        COLLECTIONS.MESSAGES,
+        [Query.equal("groupId", groupId), Query.orderDesc("$createdAt"), Query.limit(50)]
+      );
+      const recentMsgs = (recentMsgsRes.documents as any[]).map(m => ({ senderId: m.senderId, text: m.text })).reverse();
+      const prefs = await extractCafePreferencesFromChat(recentMsgs);
+      reranked = await rerankPlacesWithLLM(data.results, prefs);
+    } catch (_) {
+      // fall back silently
+    }
+
+    const top = reranked.slice(0, 3);
     const lines = top.map((p: any, i: number) => `${i + 1}. ${p.name}${p.rating ? ` (⭐ ${p.rating})` : ""}${p.formatted_address ? ` — ${p.formatted_address}` : ""}`);
     await sendSystemMessage(groupId, `Top cafe suggestions for '${query}':\n${lines.join("\n")}\nUse '/lock' after RSVPs to finalize.`);
 
@@ -129,7 +145,7 @@ async function rsvpSummary(groupId: string): Promise<void> {
   await sendSystemMessage(groupId, `RSVP — Join: ${counts.join || 0}, Maybe: ${counts.maybe || 0}, Not joining: ${counts.no || 0}.`);
 }
 
-async function lockDecision(groupId: string): Promise<void> {
+async function lockDecision(groupId: string, groupName?: string): Promise<void> {
   const active = await getActivePoll(groupId);
   if (!active) {
     await sendSystemMessage(groupId, "No active plan to lock.");
@@ -139,14 +155,25 @@ async function lockDecision(groupId: string): Promise<void> {
   const votes = await getPollVotes(active.$id);
   const joiners = votes.filter((v: any) => v.choice === "join").map((v: any) => v.userId);
   await deactivatePoll(active.$id, active.creatorId || "planbot").catch(() => {});
-  const summary = [
-    `Final Itinerary: ${active.title}`,
-    meta?.date ? `Date: ${meta.date}` : undefined,
-    meta?.time ? `Time: ${meta.time}` : undefined,
-    active.description ? `Where: ${active.description}` : undefined,
-    `RSVP: ${joiners.length} joining`,
-  ].filter(Boolean).join("\n");
-  await sendSystemMessage(groupId, summary);
+
+  // Try LLM summary; fallback to template
+  try {
+    const pretty = await summarizeItinerary(
+      { title: active.title, description: active.description, metadata: meta },
+      votes as any,
+      groupName
+    );
+    await sendSystemMessage(groupId, pretty);
+  } catch (_) {
+    const summary = [
+      `Final Itinerary: ${active.title}`,
+      meta?.date ? `Date: ${meta.date}` : undefined,
+      meta?.time ? `Time: ${meta.time}` : undefined,
+      active.description ? `Where: ${active.description}` : undefined,
+      `RSVP: ${joiners.length} joining`,
+    ].filter(Boolean).join("\n");
+    await sendSystemMessage(groupId, summary);
+  }
 }
 
 async function help(groupId: string): Promise<void> {
@@ -189,7 +216,7 @@ export async function handlePlanbotCommand(input: string, ctx: PlanbotContext): 
       await rsvpSummary(ctx.groupId);
       return { handled: true };
     case "lock":
-      await lockDecision(ctx.groupId);
+      await lockDecision(ctx.groupId, ctx.group?.name);
       return { handled: true };
     default:
       await sendSystemMessage(ctx.groupId, "Unknown command. Use /help for options.");
