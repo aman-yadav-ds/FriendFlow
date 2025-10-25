@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/dialog";
 import { databases, client, DATABASE_ID, COLLECTIONS } from "@/lib/appwrite";
 import { ID, Query } from "appwrite";
+import { handlePlanbotCommand } from "@/lib/planbot";
 
 // Interfaces
 interface Group {
@@ -113,6 +114,7 @@ export default function GroupChat() {
   const [votes, setVotes] = useState<Vote[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // Fetch group data
   useEffect(() => {
@@ -311,6 +313,23 @@ export default function GroupChat() {
     e.preventDefault();
     if (!message.trim()) return;
 
+    // Intercept slash/command messages with PlanBot
+    const isCommand = message.trim().startsWith("/") || message.trim().startsWith("!");
+    if (isCommand && groupId) {
+      setIsSending(true);
+      try {
+        const res = await handlePlanbotCommand(message, { groupId, currentUser, group });
+        if (res.handled) {
+          setMessage("");
+          return; // Do not send a regular message
+        }
+      } catch (err) {
+        toast({ variant: "destructive", title: "PlanBot error", description: err instanceof Error ? err.message : "Command failed" });
+      } finally {
+        setIsSending(false);
+      }
+    }
+
     setIsSending(true);
     try {
       await databases.createDocument(
@@ -494,6 +513,9 @@ export default function GroupChat() {
           >
             <Users className="h-4 w-4 mr-2" />
             Polls
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setHelpOpen(true)} data-testid="button-help">
+            Help
           </Button>
           <ThemeToggle />
         </div>
@@ -800,6 +822,23 @@ export default function GroupChat() {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Help Dialog */}
+      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>PlanBot commands</DialogTitle>
+            <DialogDescription>Type these in chat starting with '/'</DialogDescription>
+          </DialogHeader>
+          <div className="text-sm space-y-2">
+            <p>• /plan cafe &lt;area&gt; — suggest cafes and create an RSVP poll</p>
+            <p>• /when YYYY-MM-DD HH:MM — attach date/time to the active plan</p>
+            <p>• /rsvp — show current RSVP summary</p>
+            <p>• /lock — lock the current plan and post the final itinerary</p>
+            <p>• /help — show this help</p>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
