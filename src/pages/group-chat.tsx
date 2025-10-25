@@ -80,6 +80,13 @@ interface Vote {
   choice: string;
 }
 
+interface Reaction {
+  $id: string;
+  messageId: string;
+  userId: string;
+  emoji: string;
+}
+
 interface User {
   $id: string;
   name: string;
@@ -101,6 +108,7 @@ export default function GroupChat() {
   const [selectedPoll, setSelectedPoll] = useState<Poll | null>(null);
   const [group, setGroup] = useState<Group | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [reactions, setReactions] = useState<Reaction[]>([]);
   const [polls, setPolls] = useState<Poll[]>([]);
   const [votes, setVotes] = useState<Vote[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(true);
@@ -201,9 +209,40 @@ export default function GroupChat() {
     fetchVotes();
   }, [polls]);
 
+  // Add this useEffect somewhere after your messages/polls fetch
+  useEffect(() => {
+    const fetchReactions = async () => {
+      if (!groupId) return;
+
+      try {
+        const response = await databases.listDocuments(
+          DATABASE_ID,
+          COLLECTIONS.REACTIONS,
+          [Query.orderAsc("$createdAt")]
+        );
+        setReactions(response.documents as unknown as Reaction[]);
+      } catch (error) {
+        console.error("Failed to fetch reactions:", error);
+      }
+    };
+
+    fetchReactions();
+  }, [groupId]);
+
+
   // Real-time subscriptions
   useEffect(() => {
     if (!groupId) return;
+
+      const unsubscribe = client.subscribe(
+        `databases.${DATABASE_ID}.collections.${COLLECTIONS.REACTIONS}.documents`,
+        (response) => {
+          const payload = response.payload as any;
+          if (response.events.includes("databases.*.collections.*.documents.*.create")) {
+            setReactions((prev) => [...prev, payload as Reaction]);
+          }
+        }
+      );
 
     // Subscribe to messages
     const unsubscribeMessages = client.subscribe(
@@ -302,31 +341,31 @@ export default function GroupChat() {
 
   const handleReaction = async (messageId: string, emoji: string) => {
     try {
-      const msg = messages.find((m) => m.$id === messageId);
-      if (!msg) return;
-
-      const reactions = msg.reactions || [];
+      // Check if user already reacted with the same emoji
       const existingReaction = reactions.find(
-        (r) => r.userId === currentUser.$id && r.emoji === emoji
+        (r) => r.messageId === messageId && r.userId === currentUser.$id && r.emoji === emoji
       );
 
-      let newReactions;
       if (existingReaction) {
-        // Remove reaction
-        newReactions = reactions.filter(
-          (r) => !(r.userId === currentUser.$id && r.emoji === emoji)
+        // Delete the reaction
+        await databases.deleteDocument(
+          DATABASE_ID,
+          COLLECTIONS.REACTIONS,
+          existingReaction.$id
         );
       } else {
-        // Add reaction
-        newReactions = [...reactions, { userId: currentUser.$id, emoji }];
+        // Add a new reaction
+        await databases.createDocument(
+          DATABASE_ID,
+          COLLECTIONS.REACTIONS,
+          ID.unique(),
+          {
+            messageId,
+            userId: currentUser.$id,
+            emoji,
+          }
+        );
       }
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        COLLECTIONS.MESSAGES,
-        messageId,
-        { reactions: newReactions }
-      );
     } catch (error) {
       toast({
         variant: "destructive",
@@ -334,6 +373,7 @@ export default function GroupChat() {
       });
     }
   };
+
 
   const handleVote = async (pollId: string, choice: string) => {
     try {
@@ -546,40 +586,60 @@ export default function GroupChat() {
                               </Card>
                             )}
                           </div>
-                          {msg.reactions && msg.reactions.length > 0 && (
-                            <div className="flex gap-1 mt-1 px-2">
-                              {Object.entries(
-                                msg.reactions.reduce((acc, r) => {
-                                  acc[r.emoji] = (acc[r.emoji] || 0) + 1;
-                                  return acc;
-                                }, {} as Record<string, number>)
-                              ).map(([emoji, count]) => (
-                                <Badge
-                                  key={emoji}
-                                  variant="secondary"
-                                  className="text-xs px-2 py-0 h-6 cursor-pointer hover:bg-secondary/80"
-                                  onClick={() => handleReaction(msg.$id, emoji)}
+                          {/* --- Reactions Display --- */}
+                          <div className="flex flex-col gap-1 mt-1 px-2">
+                            {reactions.filter(r => r.messageId === msg.$id).length > 0 && (
+                              <div className="flex gap-1">
+                                {Object.entries(
+                                  reactions
+                                    .filter(r => r.messageId === msg.$id)
+                                    .reduce((acc, r) => {
+                                      acc[r.emoji] = (acc[r.emoji] || 0) + 1;
+                                      return acc;
+                                    }, {} as Record<string, number>)
+                                ).map(([emoji, count]) => (
+                                  <Badge
+                                    key={emoji}
+                                    variant="secondary"
+                                    className="text-xs px-2 py-0 h-6 cursor-pointer hover:bg-secondary/80"
+                                    onClick={() => handleReaction(msg.$id, emoji)}
+                                  >
+                                    {emoji} {count}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* --- Emoji Picker --- */}
+                            <div className="flex gap-1">
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button variant="ghost" size="sm" className="h-6 px-2">
+                                    <Smile className="h-3 w-3" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent
+                                  className="w-auto p-0 border-0"
+                                  align={isOwn ? "end" : "start"}
+                                  side="top"
+                                  sideOffset={8}
+                                  forceMount
                                 >
-                                  {emoji} {count}
-                                </Badge>
-                              ))}
+                                  <Picker
+                                    data={data}
+                                    onEmojiSelect={(emoji: any) =>{
+                                      console.log("Selected emoji:", emoji.native, "for message", msg.$id);
+                                      handleReaction(msg.$id, emoji.native)
+                                    }}
+                                    theme={
+                                      document.documentElement.classList.contains("dark")
+                                        ? "dark"
+                                        : "light"
+                                    }
+                                  />
+                                </PopoverContent>
+                              </Popover>
                             </div>
-                          )}
-                          <div className="flex gap-1 mt-1">
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-6 px-2">
-                                  <Smile className="h-3 w-3" />
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-auto p-0 border-0" align={isOwn ? "end" : "start"}>
-                                <Picker
-                                  data={data}
-                                  onEmojiSelect={(emoji: any) => handleReaction(msg.$id, emoji.native)}
-                                  theme={document.documentElement.classList.contains("dark") ? "dark" : "light"}
-                                />
-                              </PopoverContent>
-                            </Popover>
                           </div>
                         </div>
                       </motion.div>

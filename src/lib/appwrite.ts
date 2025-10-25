@@ -18,6 +18,7 @@ export const COLLECTIONS = {
   POLLS: import.meta.env.VITE_APPWRITE_COLLECTION_POLLS || "polls",
   VOTES: import.meta.env.VITE_APPWRITE_COLLECTION_VOTES || "votes",
   USERS: import.meta.env.VITE_APPWRITE_COLLECTION_USERS || "users",
+  REACTIONS: import.meta.env.VITE_APPWRITE_COLLECTION_REACTIONS || "reactions",
 };
 
 // Helper types
