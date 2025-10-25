@@ -204,7 +204,6 @@ export default function PollCreation() {
           senderName: currentUser.name,
           senderAvatar: currentUser.avatar || "",
           text: `📊 New poll created: ${movie.title}`,
-          reactions: [],
           pollId: newPoll.$id,
         }
       );
@@ -295,7 +294,6 @@ export default function PollCreation() {
           senderAvatar: currentUser.avatar || "",
           text: `📊 New poll created: ${place.name}`,
           createdAt: new Date().toISOString(),
-          reactions: [],
           pollId: newPoll.$id,
         }
       );

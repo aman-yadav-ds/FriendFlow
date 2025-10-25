@@ -1,25 +1,28 @@
 // lib/appwrite.ts
-import { Client, Databases, Account, Models } from "appwrite";
+import { Client, Databases, Account, Models, Storage } from "appwrite";
 
 // Initialize Appwrite Client
 export const client = new Client()
-  .setEndpoint(import.meta.env.VITE_APPWRITE_ENDPOINT || "https://cloud.appwrite.io/v1")
-  .setProject(import.meta.env.VITE_APPWRITE_PROJECT_ID || "YOUR_PROJECT_ID");
+  .setEndpoint(import.meta.env.VITE_APPWRITE_ENDPOINT)
+  .setProject(import.meta.env.VITE_APPWRITE_PROJECT_ID);
 
 export const databases = new Databases(client);
 export const account = new Account(client);
+export const storage = new Storage(client);
 
 // Database and Collection IDs
-export const DATABASE_ID = import.meta.env.VITE_APPWRITE_DATABASE_ID || "YOUR_DATABASE_ID";
+export const DATABASE_ID = import.meta.env.VITE_APPWRITE_DATABASE_ID;
 
 export const COLLECTIONS = {
   GROUPS: import.meta.env.VITE_APPWRITE_COLLECTION_GROUPS,
   MESSAGES: import.meta.env.VITE_APPWRITE_COLLECTION_MESSAGES,
   POLLS: import.meta.env.VITE_APPWRITE_COLLECTION_POLLS,
   VOTES: import.meta.env.VITE_APPWRITE_COLLECTION_VOTES,
-  USERS: import.meta.env.VITE_APPWRITE_COLLECTION_USERS,
   REACTIONS: import.meta.env.VITE_APPWRITE_COLLECTION_REACTIONS,
+  USERS: import.meta.env.VITE_APPWRITE_COLLECTION_USERS,
 };
+
+export const BUCKET_ID = import.meta.env.VITE_APPWRITE_BUCKET_ID;
 
 // Helper types
 export interface AppwriteUser {

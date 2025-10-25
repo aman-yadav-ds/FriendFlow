@@ -27,7 +27,6 @@ async function sendSystemMessage(groupId: string, text: string) {
       senderAvatar: "",
       text,
       isSystemMessage: true,
-      reactions: [],
     }
   );
 }

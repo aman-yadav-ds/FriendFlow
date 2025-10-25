@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { useToast } from "@/hooks/use-toast";
 import { Mail, Lock, User, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
-import { account } from "@/lib/appwrite";
+import { account, databases, COLLECTIONS, DATABASE_ID } from "@/lib/appwrite";
 import { ID } from "appwrite";
 import { useAuth } from "@/lib/auth";
 
@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth";
 export default function Register() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { setUser } = useAuth(); // useAuth now exposes setUser
+  const { setUser } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -26,15 +26,30 @@ export default function Register() {
     setIsLoading(true);
 
     try {
-      // Create account
-      await account.create(ID.unique(), email, password, name);
+      // Step 1: Create account
+      const newAccount = await account.create(ID.unique(), email, password, name);
 
-      // Automatically log in after registration
       await account.createEmailPasswordSession(email, password);
-
-      // Fetch current user immediately
+      
       const currentUser = await account.get();
       setUser(currentUser);
+      // Step 2: Create user profile in database
+      try {
+        await databases.createDocument(
+          DATABASE_ID,
+          COLLECTIONS.USERS,
+          ID.unique(),
+          {
+            userId: newAccount.$id,
+            email: email,
+            fullName: name,
+          }
+        );
+      } catch (profileError) {
+        console.error("Failed to create profile:", profileError);
+        // Continue even if profile creation fails
+        // Profile will be created on first visit to profile page
+      }
 
       toast({
         title: "Account created!",
@@ -69,7 +84,7 @@ export default function Register() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Name</Label>
                 <div className="relative">
@@ -119,7 +134,11 @@ export default function Register() {
                   Password must be at least 8 characters
                 </p>
               </div>
-              <Button type="submit" className="w-full" disabled={isLoading}>
+              <Button 
+                onClick={handleSubmit} 
+                className="w-full" 
+                disabled={isLoading}
+              >
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -129,7 +148,7 @@ export default function Register() {
                   "Create Account"
                 )}
               </Button>
-            </form>
+            </div>
           </CardContent>
           <CardFooter className="flex justify-center">
             <p className="text-sm text-muted-foreground">

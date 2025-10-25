@@ -66,7 +66,13 @@ export default function Dashboard() {
       ]);
       setGroups(response.documents as unknown as Group[]);
 
-    } catch (err) {
+    } catch (err: any) {
+      // Don't show error if user is not authorized (likely logged out)
+      if (err.code === 401 || err.type === 'user_unauthorized') {
+        console.log("User session expired or logged out");
+        return;
+      }
+      
       console.error("Error fetching groups:", err);
       toast({
         variant: "destructive",
@@ -80,14 +86,37 @@ export default function Dashboard() {
 
 
   useEffect(() => {
-    if (!user) return; // ⚠️ don't fetch if user isn't logged in
-    fetchGroups();
-  }, [user]);
+    // Only fetch if user is logged in
+    if (!user?.$id) {
+      setIsLoading(false);
+      return;
+    }
 
+    let isMounted = true;
+
+    const loadGroups = async () => {
+      if (isMounted && user?.$id) {
+        await fetchGroups();
+      }
+    };
+
+    loadGroups();
+
+    // Cleanup function to prevent state updates after unmount
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.$id]);
 
   const handleLogout = async () => {
-    await logout();
-    setLocation("/auth/login");
+    try {
+      // Clear groups before logout to prevent stale data
+      setGroups([]);
+      await logout();
+      setLocation("/auth/login");
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   };
 
   // Create a new group
@@ -267,7 +296,7 @@ export default function Dashboard() {
             <div className="h-10 w-10 rounded-lg bg-primary flex items-center justify-center">
               <Users className="h-6 w-6 text-primary-foreground" />
             </div>
-            <h1 className="text-xl font-bold font-display">Event Planner</h1>
+            <h1 className="text-xl font-bold font-display">FriendFlow</h1>
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
