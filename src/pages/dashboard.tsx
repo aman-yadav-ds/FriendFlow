@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { account, databases } from "@/lib/appwrite";
+import { databases } from "@/lib/appwrite";
 import { Permission, Query, Role, ID } from "appwrite"; // Added ID
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";

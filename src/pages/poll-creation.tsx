@@ -88,20 +88,121 @@ export default function PollCreation() {
   };
 
   const searchPlaces = async () => {
-    if (!searchQuery.trim()) return [];
+    if (!searchQuery.trim()) return;
 
+    setIsSearching(true);
     try {
-      const response = await fetch(`/api/places?query=${encodeURIComponent(searchQuery)}`);
-      if (!response.ok) throw new Error("Failed to fetch places");
+      // Using Nominatim for geocoding the search query
+      const nominatimResponse = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&format=json&limit=1&addressdetails=1`,
+        {
+          headers: {
+            'User-Agent': 'FriendFlow/1.0' // Replace with your app name
+          }
+        }
+      );
+      
+      if (!nominatimResponse.ok) {
+        throw new Error("Failed to geocode search query");
+      }
+      
+      const geoData = await nominatimResponse.json();
+      
+      if (!geoData || geoData.length === 0) {
+        setPlaceResults([]);
+        toast({
+          title: "No results",
+          description: "Try a different search term or location",
+        });
+        return;
+      }
 
-      const data = await response.json();
-      return data.results || [];
-    } catch (err) {
-      console.error("Error fetching places:", err);
-      return [];
+      const { lat, lon } = geoData[0];
+      
+      // Search for places using Overpass API within 5km radius
+      const overpassQuery = `
+        [out:json][timeout:25];
+        (
+          node["amenity"~"restaurant|cafe|bar|pub|fast_food|cinema|theatre|museum"](around:5000,${lat},${lon});
+          node["tourism"~"attraction|hotel|museum|gallery"](around:5000,${lat},${lon});
+          node["leisure"~"park|sports_centre|stadium|swimming_pool"](around:5000,${lat},${lon});
+          node["shop"~"mall|supermarket|department_store"](around:5000,${lat},${lon});
+        );
+        out body 20;
+      `;
+
+      const overpassResponse = await fetch(
+        'https://overpass-api.de/api/interpreter',
+        {
+          method: 'POST',
+          body: overpassQuery,
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          }
+        }
+      );
+
+      if (!overpassResponse.ok) {
+        throw new Error("Failed to fetch places");
+      }
+
+      const data = await overpassResponse.json();
+      
+      // Transform Overpass results to match PlaceResult interface
+      const places: PlaceResult[] = data.elements
+        .filter((element: any) => element.tags && element.tags.name)
+        .map((element: any) => {
+          const tags = element.tags;
+          
+          // Build address from available tags
+          const addressParts = [
+            tags['addr:housenumber'],
+            tags['addr:street'],
+            tags['addr:city'],
+            tags['addr:postcode'],
+            tags['addr:country']
+          ].filter(Boolean);
+          
+          const formatted_address = addressParts.length > 0 
+            ? addressParts.join(', ')
+            : `${element.lat.toFixed(6)}, ${element.lon.toFixed(6)}`;
+
+          // Determine types based on tags
+          const types: string[] = [];
+          if (tags.amenity) types.push(tags.amenity);
+          if (tags.tourism) types.push(tags.tourism);
+          if (tags.leisure) types.push(tags.leisure);
+          if (tags.shop) types.push(tags.shop);
+
+          return {
+            place_id: `osm_${element.type}_${element.id}`,
+            name: tags.name || 'Unnamed Place',
+            formatted_address: formatted_address,
+            rating: tags.rating ? parseFloat(tags.rating) : undefined,
+            types: types
+          };
+        });
+
+      setPlaceResults(places);
+
+      if (places.length === 0) {
+        toast({
+          title: "No places found",
+          description: "Try searching for a different location or category",
+        });
+      }
+
+    } catch (error) {
+      console.error("Places search error:", error);
+      toast({
+        variant: "destructive",
+        title: "Search failed",
+        description: "Could not search places. Please try again.",
+      });
+    } finally {
+      setIsSearching(false);
     }
-  }
-
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -239,10 +340,10 @@ export default function PollCreation() {
         image: photoUrl,
         choices: ["join", "maybe", "no"], // Standard voting choices
         active: true,
-        metadata: {
+        metadata: JSON.stringify({
           rating: place.rating || 0,
           types: place.types || [],
-        },
+        }),
       };
 
       const newPoll = await databases.createDocument(
@@ -268,7 +369,6 @@ export default function PollCreation() {
           senderName: currentUser.name,
           senderAvatar: currentUser.avatar || "",
           text: `📊 New poll created: ${place.name}`,
-          createdAt: new Date().toISOString(),
           pollId: newPoll.$id,
         }
       );

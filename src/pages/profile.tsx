@@ -10,9 +10,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Upload, Loader2, Plus, X } from "lucide-react";
 import { motion } from "framer-motion";
-import { ID, Query,ImageGravity } from "appwrite";
+import { ID, Query } from "appwrite";
 import { databases, DATABASE_ID, COLLECTIONS, storage, BUCKET_ID } from "@/lib/appwrite";
-import { Url } from "url";
 
 
 interface UserProfile {
