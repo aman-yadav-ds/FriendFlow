@@ -296,7 +296,7 @@ export default function Dashboard() {
             <div className="h-10 w-10 rounded-lg bg-primary flex items-center justify-center">
               <Users className="h-6 w-6 text-primary-foreground" />
             </div>
-            <h1 className="text-xl font-bold font-display">Event Planner</h1>
+            <h1 className="text-xl font-bold font-display">FriendFlow</h1>
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
