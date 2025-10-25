@@ -323,7 +323,6 @@ export default function GroupChat() {
           senderName: currentUser.name,
           senderAvatar: currentUser.avatar || "",
           text: message,
-          reactions: [],
           isSystemMessage: false, // <-- ADDED
         }
       );
