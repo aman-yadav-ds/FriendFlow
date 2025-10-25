@@ -1,18 +1,22 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Mail, Lock, Loader2 } from "lucide-react";
+import { Mail, Lock, User, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
+import { account } from "@/lib/appwrite";
+import { ID } from "appwrite";
+import { useAuth } from "@/lib/auth";
 
-export default function Login() {
+
+export default function Register() {
   const [, setLocation] = useLocation();
-  const { login } = useAuth();
   const { toast } = useToast();
+  const { setUser } = useAuth(); // useAuth now exposes setUser
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -22,17 +26,27 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      await login(email, password);
+      // Create account
+      await account.create(ID.unique(), email, password, name);
+
+      // Automatically log in after registration
+      await account.createEmailPasswordSession(email, password);
+
+      // Fetch current user immediately
+      const currentUser = await account.get();
+      setUser(currentUser);
+
       toast({
-        title: "Welcome back!",
-        description: "You've successfully logged in.",
+        title: "Account created!",
+        description: "Welcome to FriendFlow!",
       });
+
       setLocation("/dashboard");
-    } catch (error) {
+    } catch (error: any) {
       toast({
         variant: "destructive",
-        title: "Login failed",
-        description: error instanceof Error ? error.message : "Invalid credentials",
+        title: "Registration failed",
+        description: error.message || "Could not create account. Please try again.",
       });
     } finally {
       setIsLoading(false);
@@ -49,15 +63,28 @@ export default function Login() {
       >
         <Card className="shadow-xl">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-3xl font-bold text-center font-display">
-              Welcome Back
-            </CardTitle>
+            <CardTitle className="text-3xl font-bold text-center font-display">Create Account</CardTitle>
             <CardDescription className="text-center">
-              Sign in to continue planning events with your friends
+              Join FriendFlow and start planning events with friends
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Name</Label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="name"
+                    type="text"
+                    placeholder="John Doe"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    className="pl-10"
+                  />
+                </div>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <div className="relative">
@@ -70,7 +97,6 @@ export default function Login() {
                     onChange={(e) => setEmail(e.target.value)}
                     required
                     className="pl-10"
-                    data-testid="input-email"
                   />
                 </div>
               </div>
@@ -85,38 +111,35 @@ export default function Login() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
+                    minLength={8}
                     className="pl-10"
-                    data-testid="input-password"
                   />
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Password must be at least 8 characters
+                </p>
               </div>
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={isLoading}
-                data-testid="button-login"
-              >
+              <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Signing in...
+                    Creating account...
                   </>
                 ) : (
-                  "Sign In"
+                  "Create Account"
                 )}
               </Button>
             </form>
           </CardContent>
           <CardFooter className="flex justify-center">
             <p className="text-sm text-muted-foreground">
-              Don't have an account?{" "}
+              Already have an account?{" "}
               <button
                 type="button"
-                onClick={() => setLocation("/auth/register")}
+                onClick={() => setLocation("/auth/login")}
                 className="text-primary hover:underline font-medium"
-                data-testid="link-register"
               >
-                Create one
+                Sign in
               </button>
             </p>
           </CardFooter>

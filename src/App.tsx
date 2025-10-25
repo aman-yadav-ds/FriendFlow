@@ -11,6 +11,7 @@ import Register from "@/pages/auth/register";
 import Dashboard from "@/pages/dashboard";
 import GroupChat from "@/pages/group-chat";
 import PollCreation from "@/pages/poll-creation";
+import PollManagement from "@/pages/poll-management";
 import Profile from "@/pages/profile";
 import { Loader2 } from "lucide-react";
 
@@ -53,27 +54,45 @@ function PublicRoute({ component: Component }: { component: () => JSX.Element })
 function Router() {
   return (
     <Switch>
+      {/* Public Routes */}
       <Route path="/auth/login">
         <PublicRoute component={Login} />
       </Route>
       <Route path="/auth/register">
         <PublicRoute component={Register} />
       </Route>
+
+      {/* Protected Routes */}
       <Route path="/dashboard">
         <ProtectedRoute component={Dashboard} />
       </Route>
+      
+      {/* Group Chat Route */}
       <Route path="/groups/:id">
         <ProtectedRoute component={GroupChat} />
       </Route>
+      
+      {/* Poll Creation Route - for creating new polls */}
       <Route path="/groups/:id/poll">
         <ProtectedRoute component={PollCreation} />
       </Route>
+      
+      {/* Poll Management Route - for viewing/managing all polls */}
+      <Route path="/groups/:id/polls">
+        <ProtectedRoute component={PollManagement} />
+      </Route>
+      
+      {/* User Profile Route */}
       <Route path="/profile">
         <ProtectedRoute component={Profile} />
       </Route>
+
+      {/* Root Redirect */}
       <Route path="/">
         <Redirect to="/dashboard" />
       </Route>
+
+      {/* 404 Not Found */}
       <Route component={NotFound} />
     </Switch>
   );

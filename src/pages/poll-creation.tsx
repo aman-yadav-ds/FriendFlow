@@ -2,14 +2,14 @@ import { useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Film, MapPin, Search, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { databases, DATABASE_ID, COLLECTIONS } from "@/lib/appwrite";
+import { ID, Permission, Role } from "appwrite";
 
 interface MovieResult {
   id: number;
@@ -29,11 +29,21 @@ interface PlaceResult {
   types?: string[];
 }
 
+// API configuration
+const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY;
+const GOOGLE_PLACES_API_KEY = import.meta.env.VITE_GOOGLE_PLACES_API_KEY;
+const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+const GOOGLE_PLACES_BASE_URL = "https://maps.googleapis.com/maps/api/place";
+
 export default function PollCreation() {
   const params = useParams<{ id: string }>();
   const groupId = params.id;
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  
+  // Get current user from localStorage or your auth context
+  const currentUser = JSON.parse(localStorage.getItem("user") || '{"$id":"","name":"Guest"}');
+  
   const [pollType, setPollType] = useState<"movie" | "place">("movie");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
@@ -43,19 +53,35 @@ export default function PollCreation() {
 
   const searchMovies = async () => {
     if (!searchQuery.trim()) return;
+    
+    if (!TMDB_API_KEY) {
+      toast({
+        variant: "destructive",
+        title: "Configuration Error",
+        description: "TMDB API key is not configured",
+      });
+      return;
+    }
+
     setIsSearching(true);
     try {
       const response = await fetch(
-        `/api/external/tmdb/search?query=${encodeURIComponent(searchQuery)}`
+        `${TMDB_BASE_URL}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchQuery)}&language=en-US&page=1&include_adult=false`
       );
+      
+      if (!response.ok) {
+        throw new Error("Failed to search movies");
+      }
+      
       const data = await response.json();
       setMovieResults(data.results || []);
     } catch (error) {
       toast({
         variant: "destructive",
         title: "Search failed",
-        description: "Could not search movies",
+        description: "Could not search movies. Please try again.",
       });
+      console.error("Movie search error:", error);
     } finally {
       setIsSearching(false);
     }
@@ -63,19 +89,40 @@ export default function PollCreation() {
 
   const searchPlaces = async () => {
     if (!searchQuery.trim()) return;
+    
+    if (!GOOGLE_PLACES_API_KEY) {
+      toast({
+        variant: "destructive",
+        title: "Configuration Error",
+        description: "Google Places API key is not configured",
+      });
+      return;
+    }
+
     setIsSearching(true);
     try {
       const response = await fetch(
-        `/api/external/places/search?query=${encodeURIComponent(searchQuery)}`
+        `${GOOGLE_PLACES_BASE_URL}/textsearch/json?query=${encodeURIComponent(searchQuery)}&key=${GOOGLE_PLACES_API_KEY}`
       );
+      
+      if (!response.ok) {
+        throw new Error("Failed to search places");
+      }
+      
       const data = await response.json();
+      
+      if (data.status !== "OK" && data.status !== "ZERO_RESULTS") {
+        throw new Error(data.error_message || "Places search failed");
+      }
+      
       setPlaceResults(data.results || []);
     } catch (error) {
       toast({
         variant: "destructive",
         title: "Search failed",
-        description: "Could not search places",
+        description: "Could not search places. Please try again.",
       });
+      console.error("Places search error:", error);
     } finally {
       setIsSearching(false);
     }
@@ -93,29 +140,87 @@ export default function PollCreation() {
   const createMoviePoll = async (movie: MovieResult) => {
     setIsCreating(true);
     try {
-      await apiRequest("POST", `/api/groups/${groupId}/polls`, {
+      // First, check if there's already an active poll in this group
+      const existingPolls = await databases.listDocuments(
+        DATABASE_ID,
+        COLLECTIONS.POLLS,
+        [
+          // Query for active polls in this group
+        ]
+      );
+
+      // Deactivate any existing active polls
+      for (const poll of existingPolls.documents) {
+        if ((poll as any).active && (poll as any).groupId === groupId) {
+          await databases.updateDocument(
+            DATABASE_ID,
+            COLLECTIONS.POLLS,
+            (poll as any).$id,
+            { active: false }
+          );
+        }
+      }
+
+      // Create the new poll with permissions
+      const pollData = {
+        groupId: groupId!,
+        creatorId: currentUser.$id,
+        creatorName: currentUser.name,
         type: "movie",
         externalId: movie.id.toString(),
         title: movie.title,
-        description: movie.overview,
+        description: movie.overview || "",
         image: movie.poster_path
           ? `https://image.tmdb.org/t/p/w500${movie.poster_path}`
-          : null,
-        metadata: {
+          : "",
+        choices: ["join", "maybe", "no"], // Standard voting choices
+        active: true,
+        metadata: JSON.stringify({
           releaseDate: movie.release_date,
           rating: movie.vote_average,
-        },
-      });
+        }),
+      };
+
+      const newPoll = await databases.createDocument(
+        DATABASE_ID,
+        COLLECTIONS.POLLS,
+        ID.unique(),
+        pollData,
+        [
+          Permission.read(Role.any()), // Anyone can read
+          Permission.update(Role.user(currentUser.$id)), // Only creator can update
+          Permission.delete(Role.user(currentUser.$id)), // Only creator can delete
+        ]
+      );
+
+      // Create a message in the group chat announcing the poll
+      await databases.createDocument(
+        DATABASE_ID,
+        COLLECTIONS.MESSAGES,
+        ID.unique(),
+        {
+          groupId: groupId!,
+          senderId: currentUser.$id,
+          senderName: currentUser.name,
+          senderAvatar: currentUser.avatar || "",
+          text: `📊 New poll created: ${movie.title}`,
+          reactions: [],
+          pollId: newPoll.$id,
+        }
+      );
+
       toast({
         title: "Poll created!",
         description: `Created poll for ${movie.title}`,
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "polls"] });
+      
       setLocation(`/groups/${groupId}`);
     } catch (error) {
+      console.error("Error creating poll:", error);
       toast({
         variant: "destructive",
         title: "Failed to create poll",
+        description: error instanceof Error ? error.message : "Please try again",
       });
     } finally {
       setIsCreating(false);
@@ -125,31 +230,88 @@ export default function PollCreation() {
   const createPlacePoll = async (place: PlaceResult) => {
     setIsCreating(true);
     try {
-      const photoUrl = place.photos?.[0]
-        ? `/api/external/places/photo?reference=${place.photos[0].photo_reference}`
-        : null;
+      // First, check if there's already an active poll in this group
+      const existingPolls = await databases.listDocuments(
+        DATABASE_ID,
+        COLLECTIONS.POLLS,
+        []
+      );
 
-      await apiRequest("POST", `/api/groups/${groupId}/polls`, {
+      // Deactivate any existing active polls
+      for (const poll of existingPolls.documents) {
+        if ((poll as any).active && (poll as any).groupId === groupId) {
+          await databases.updateDocument(
+            DATABASE_ID,
+            COLLECTIONS.POLLS,
+            (poll as any).$id,
+            { active: false }
+          );
+        }
+      }
+
+      const photoUrl = place.photos?.[0]
+        ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${GOOGLE_PLACES_API_KEY}`
+        : "";
+
+      // Create the new poll with permissions
+      const pollData = {
+        groupId: groupId!,
+        creatorId: currentUser.$id,
+        creatorName: currentUser.name,
         type: "place",
         externalId: place.place_id,
         title: place.name,
-        description: place.formatted_address,
+        description: place.formatted_address || "",
         image: photoUrl,
+        choices: ["join", "maybe", "no"], // Standard voting choices
+        active: true,
         metadata: {
-          rating: place.rating,
-          types: place.types,
+          rating: place.rating || 0,
+          types: place.types || [],
         },
-      });
+      };
+
+      const newPoll = await databases.createDocument(
+        DATABASE_ID,
+        COLLECTIONS.POLLS,
+        ID.unique(),
+        pollData,
+        [
+          Permission.read(Role.any()), // Anyone can read
+          Permission.update(Role.user(currentUser.$id)), // Only creator can update
+          Permission.delete(Role.user(currentUser.$id)), // Only creator can delete
+        ]
+      );
+
+      // Create a message in the group chat announcing the poll
+      await databases.createDocument(
+        DATABASE_ID,
+        COLLECTIONS.MESSAGES,
+        ID.unique(),
+        {
+          groupId: groupId!,
+          senderId: currentUser.$id,
+          senderName: currentUser.name,
+          senderAvatar: currentUser.avatar || "",
+          text: `📊 New poll created: ${place.name}`,
+          createdAt: new Date().toISOString(),
+          reactions: [],
+          pollId: newPoll.$id,
+        }
+      );
+
       toast({
         title: "Poll created!",
         description: `Created poll for ${place.name}`,
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "polls"] });
+      
       setLocation(`/groups/${groupId}`);
     } catch (error) {
+      console.error("Error creating poll:", error);
       toast({
         variant: "destructive",
         title: "Failed to create poll",
+        description: error instanceof Error ? error.message : "Please try again",
       });
     } finally {
       setIsCreating(false);
@@ -169,7 +331,7 @@ export default function PollCreation() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
-            <h1 className="text-xl font-bold font-display">Create Poll</h1>
+            <h1 className="text-xl font-bold">Create Poll</h1>
             <p className="text-sm text-muted-foreground">
               Search for a movie or place to vote on
             </p>
@@ -229,7 +391,7 @@ export default function PollCreation() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3, delay: index * 0.05 }}
                   >
-                    <Card className="overflow-hidden hover-elevate">
+                    <Card className="overflow-hidden hover:shadow-lg transition-shadow">
                       <div className="flex gap-4 p-4">
                         {movie.poster_path && (
                           <img
@@ -260,7 +422,14 @@ export default function PollCreation() {
                             className="w-full"
                             data-testid={`button-create-poll-${movie.id}`}
                           >
-                            Create Poll
+                            {isCreating ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Creating...
+                              </>
+                            ) : (
+                              "Create Poll"
+                            )}
                           </Button>
                         </div>
                       </div>
@@ -288,7 +457,7 @@ export default function PollCreation() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3, delay: index * 0.05 }}
                   >
-                    <Card className="hover-elevate">
+                    <Card className="hover:shadow-lg transition-shadow">
                       <CardHeader>
                         <CardTitle className="text-lg">{place.name}</CardTitle>
                         <CardDescription className="line-clamp-2">
@@ -315,7 +484,14 @@ export default function PollCreation() {
                           className="w-full"
                           data-testid={`button-create-poll-${place.place_id}`}
                         >
-                          Create Poll
+                          {isCreating ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Creating...
+                            </>
+                          ) : (
+                            "Create Poll"
+                          )}
                         </Button>
                       </CardContent>
                     </Card>

@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -18,15 +16,12 @@ import {
   Users,
   Copy,
   BarChart3,
-  LogOut,
   ThumbsUp,
   Minus,
   ThumbsDown,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
-import type { MessageWithUser, GroupWithMembers, PollWithVotes } from "@shared/schema";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
 import {
@@ -41,60 +36,230 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { databases, client, DATABASE_ID, COLLECTIONS } from "@/lib/appwrite";
+import { ID, Query } from "appwrite";
+
+// Interfaces
+interface Group {
+  $id: string;
+  name: string;
+  members: string[];
+  activeMembers?: string[];
+  inviteCode?: string;
+}
+
+interface Message {
+  $id: string;
+  groupId: string;
+  senderId: string;
+  senderName?: string;
+  senderAvatar?: string;
+  text: string;
+  createdAt: string;
+  reactions?: Array<{ userId: string; emoji: string }>;
+  pollId?: string;
+}
+
+interface Poll {
+  $id: string;
+  groupId: string;
+  title: string;
+  description?: string;
+  image?: string;
+  type?: string;
+  choices: string[];
+  active: boolean;
+  metadata?: Record<string, any>;
+}
+
+interface Vote {
+  $id: string;
+  pollId: string;
+  userId: string;
+  choice: string;
+}
+
+interface User {
+  $id: string;
+  name: string;
+  avatar?: string;
+}
 
 export default function GroupChat() {
   const params = useParams<{ id: string }>();
   const groupId = params.id;
   const [, setLocation] = useLocation();
-  const { user } = useAuth();
   const { toast } = useToast();
+  
+  // Get current user from your auth context or localStorage
+  const currentUser: User = JSON.parse(localStorage.getItem("user") || '{"$id":"","name":"Guest"}');
+  
   const [message, setMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [selectedPoll, setSelectedPoll] = useState<PollWithVotes | null>(null);
+  const [selectedPoll, setSelectedPoll] = useState<Poll | null>(null);
+  const [group, setGroup] = useState<Group | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [polls, setPolls] = useState<Poll[]>([]);
+  const [votes, setVotes] = useState<Vote[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const ws = useRef<WebSocket | null>(null);
 
-  const { data: group } = useQuery<GroupWithMembers>({
-    queryKey: ["/api/groups", groupId],
-  });
-
-  const { data: messages, isLoading: messagesLoading } = useQuery<MessageWithUser[]>({
-    queryKey: ["/api/groups", groupId, "messages"],
-  });
-
-  const { data: polls } = useQuery<PollWithVotes[]>({
-    queryKey: ["/api/groups", groupId, "polls"],
-  });
-
-  const activePoll = polls?.find((p) => p.active);
-
+  // Fetch group data
   useEffect(() => {
-    // Connect to WebSocket for real-time updates
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    ws.current = new WebSocket(`${protocol}//${window.location.host}/ws`);
-
-    ws.current.onopen = () => {
-      // Authenticate with userId first
-      if (user?.id) {
-        ws.current?.send(JSON.stringify({ type: "auth", userId: user.id }));
-        // Then join the group
-        setTimeout(() => {
-          ws.current?.send(JSON.stringify({ type: "join", groupId }));
-        }, 100);
+    const fetchGroup = async () => {
+      try {
+        const response = await databases.getDocument(
+          DATABASE_ID,
+          COLLECTIONS.GROUPS,
+          groupId!
+        );
+        setGroup(response as unknown as Group);
+      } catch (error) {
+        console.error("Failed to fetch group:", error);
+        toast({
+          variant: "destructive",
+          title: "Failed to load group",
+        });
       }
     };
 
-    ws.current.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === "message" || data.type === "reaction" || data.type === "vote") {
-        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "messages"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "polls"] });
+    if (groupId) {
+      fetchGroup();
+    }
+  }, [groupId]);
+
+  // Fetch messages
+  useEffect(() => {
+    const fetchMessages = async () => {
+      try {
+        setMessagesLoading(true);
+        const response = await databases.listDocuments(
+          DATABASE_ID,
+          COLLECTIONS.MESSAGES,
+          [
+            Query.equal("groupId", groupId!),
+            Query.orderAsc("$createdAt"),
+            Query.limit(100)
+          ]
+        );
+        setMessages(response.documents as unknown as Message[]);
+      } catch (error) {
+        console.error("Failed to fetch messages:", error);
+      } finally {
+        setMessagesLoading(false);
       }
     };
+
+    if (groupId) {
+      fetchMessages();
+    }
+  }, [groupId]);
+
+  // Fetch polls
+  useEffect(() => {
+    const fetchPolls = async () => {
+      try {
+        const response = await databases.listDocuments(
+          DATABASE_ID,
+          COLLECTIONS.POLLS,
+          [
+            Query.equal("groupId", groupId!),
+            Query.orderDesc("$createdAt")
+          ]
+        );
+        setPolls(response.documents as unknown as Poll[]);
+      } catch (error) {
+        console.error("Failed to fetch polls:", error);
+      }
+    };
+
+    if (groupId) {
+      fetchPolls();
+    }
+  }, [groupId]);
+
+  // Fetch votes
+  useEffect(() => {
+    const fetchVotes = async () => {
+      try {
+        const activePoll = polls.find(p => p.active);
+        if (!activePoll) return;
+
+        const response = await databases.listDocuments(
+          DATABASE_ID,
+          COLLECTIONS.VOTES,
+          [Query.equal("pollId", activePoll.$id)]
+        );
+        setVotes(response.documents as unknown as Vote[]);
+      } catch (error) {
+        console.error("Failed to fetch votes:", error);
+      }
+    };
+
+    fetchVotes();
+  }, [polls]);
+
+  // Real-time subscriptions
+  useEffect(() => {
+    if (!groupId) return;
+
+    // Subscribe to messages
+    const unsubscribeMessages = client.subscribe(
+      `databases.${DATABASE_ID}.collections.${COLLECTIONS.MESSAGES}.documents`,
+      (response) => {
+        const payload = response.payload as any;
+        
+        if (payload.groupId === groupId) {
+          if (response.events.includes("databases.*.collections.*.documents.*.create")) {
+            setMessages((prev) => [...prev, payload as Message]);
+          } else if (response.events.includes("databases.*.collections.*.documents.*.update")) {
+            setMessages((prev) =>
+              prev.map((msg) => (msg.$id === payload.$id ? payload as Message : msg))
+            );
+          }
+        }
+      }
+    );
+
+    // Subscribe to polls
+    const unsubscribePolls = client.subscribe(
+      `databases.${DATABASE_ID}.collections.${COLLECTIONS.POLLS}.documents`,
+      (response) => {
+        const payload = response.payload as any;
+        
+        if (payload.groupId === groupId) {
+          if (response.events.includes("databases.*.collections.*.documents.*.create")) {
+            setPolls((prev) => [payload as Poll, ...prev]);
+          } else if (response.events.includes("databases.*.collections.*.documents.*.update")) {
+            setPolls((prev) =>
+              prev.map((poll) => (poll.$id === payload.$id ? payload as Poll : poll))
+            );
+          }
+        }
+      }
+    );
+
+    // Subscribe to votes
+    const unsubscribeVotes = client.subscribe(
+      `databases.${DATABASE_ID}.collections.${COLLECTIONS.VOTES}.documents`,
+      (response) => {
+        const payload = response.payload as any;
+        
+        if (response.events.includes("databases.*.collections.*.documents.*.create")) {
+          setVotes((prev) => [...prev, payload as Vote]);
+        } else if (response.events.includes("databases.*.collections.*.documents.*.update")) {
+          setVotes((prev) =>
+            prev.map((vote) => (vote.$id === payload.$id ? payload as Vote : vote))
+          );
+        }
+      }
+    );
 
     return () => {
-      ws.current?.close();
+      unsubscribeMessages();
+      unsubscribePolls();
+      unsubscribeVotes();
     };
   }, [groupId]);
 
@@ -108,11 +273,20 @@ export default function GroupChat() {
 
     setIsSending(true);
     try {
-      await apiRequest("POST", `/api/groups/${groupId}/messages`, {
-        text: message,
-      });
+      await databases.createDocument(
+        DATABASE_ID,
+        COLLECTIONS.MESSAGES,
+        ID.unique(),
+        {
+          groupId: groupId!,
+          senderId: currentUser.$id,
+          senderName: currentUser.name,
+          senderAvatar: currentUser.avatar || "",
+          text: message,
+          reactions: [],
+        }
+      );
       setMessage("");
-      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "messages"] });
     } catch (error) {
       toast({
         variant: "destructive",
@@ -126,8 +300,31 @@ export default function GroupChat() {
 
   const handleReaction = async (messageId: string, emoji: string) => {
     try {
-      await apiRequest("POST", `/api/messages/${messageId}/reactions`, { emoji });
-      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "messages"] });
+      const msg = messages.find((m) => m.$id === messageId);
+      if (!msg) return;
+
+      const reactions = msg.reactions || [];
+      const existingReaction = reactions.find(
+        (r) => r.userId === currentUser.$id && r.emoji === emoji
+      );
+
+      let newReactions;
+      if (existingReaction) {
+        // Remove reaction
+        newReactions = reactions.filter(
+          (r) => !(r.userId === currentUser.$id && r.emoji === emoji)
+        );
+      } else {
+        // Add reaction
+        newReactions = [...reactions, { userId: currentUser.$id, emoji }];
+      }
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        COLLECTIONS.MESSAGES,
+        messageId,
+        { reactions: newReactions }
+      );
     } catch (error) {
       toast({
         variant: "destructive",
@@ -138,8 +335,33 @@ export default function GroupChat() {
 
   const handleVote = async (pollId: string, choice: string) => {
     try {
-      await apiRequest("POST", `/api/polls/${pollId}/vote`, { choice });
-      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "polls"] });
+      // Check if user already voted
+      const existingVote = votes.find(
+        (v) => v.pollId === pollId && v.userId === currentUser.$id
+      );
+
+      if (existingVote) {
+        // Update existing vote
+        await databases.updateDocument(
+          DATABASE_ID,
+          COLLECTIONS.VOTES,
+          existingVote.$id,
+          { choice }
+        );
+      } else {
+        // Create new vote
+        await databases.createDocument(
+          DATABASE_ID,
+          COLLECTIONS.VOTES,
+          ID.unique(),
+          {
+            pollId,
+            userId: currentUser.$id,
+            choice,
+          }
+        );
+      }
+
       toast({
         title: "Vote recorded!",
         description: `You voted: ${choice}`,
@@ -166,19 +388,23 @@ export default function GroupChat() {
     return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
   };
 
-  const getVoteCounts = (poll: PollWithVotes) => {
+  const getVoteCounts = (poll: Poll) => {
     const counts = { join: 0, maybe: 0, no: 0 };
-    poll.votes?.forEach((vote) => {
-      if (vote.choice in counts) {
-        counts[vote.choice as keyof typeof counts]++;
-      }
-    });
+    votes
+      .filter((v) => v.pollId === poll.$id)
+      .forEach((vote) => {
+        if (vote.choice in counts) {
+          counts[vote.choice as keyof typeof counts]++;
+        }
+      });
     return counts;
   };
 
-  const userVote = (poll: PollWithVotes) => {
-    return poll.votes?.find((v) => v.userId === user?.id);
+  const userVote = (poll: Poll) => {
+    return votes.find((v) => v.pollId === poll.$id && v.userId === currentUser.$id);
   };
+
+  const activePoll = polls.find((p) => p.active);
 
   return (
     <div className="h-screen flex flex-col bg-background">
@@ -217,7 +443,16 @@ export default function GroupChat() {
             data-testid="button-create-poll"
           >
             <BarChart3 className="h-4 w-4 mr-2" />
-            Poll
+            New Poll
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setLocation(`/groups/${groupId}/polls`)}
+            data-testid="button-view-polls"
+          >
+            <Users className="h-4 w-4 mr-2" />
+            Polls
           </Button>
           <ThemeToggle />
         </div>
@@ -241,12 +476,12 @@ export default function GroupChat() {
               <div className="space-y-4">
                 <AnimatePresence>
                   {messages.map((msg, index) => {
-                    const isOwn = msg.userId === user?.id;
-                    const showAvatar = index === 0 || messages[index - 1].userId !== msg.userId;
+                    const isOwn = msg.senderId === currentUser.$id;
+                    const showAvatar = index === 0 || messages[index - 1].senderId !== msg.senderId;
                     
                     return (
                       <motion.div
-                        key={msg.id}
+                        key={msg.$id}
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -10 }}
@@ -254,8 +489,8 @@ export default function GroupChat() {
                       >
                         {showAvatar && !isOwn && (
                           <Avatar className="h-10 w-10">
-                            <AvatarImage src={msg.user.avatar || undefined} />
-                            <AvatarFallback>{getInitials(msg.user.name)}</AvatarFallback>
+                            <AvatarImage src={msg.senderAvatar || undefined} />
+                            <AvatarFallback>{getInitials(msg.senderName || "User")}</AvatarFallback>
                           </Avatar>
                         )}
                         {!showAvatar && !isOwn && <div className="w-10" />}
@@ -263,7 +498,7 @@ export default function GroupChat() {
                         <div className={cn("flex flex-col", isOwn && "items-end")}>
                           {showAvatar && !isOwn && (
                             <p className="text-xs text-muted-foreground mb-1 px-4">
-                              {msg.user.name}
+                              {msg.senderName}
                             </p>
                           )}
                           <div
@@ -275,13 +510,16 @@ export default function GroupChat() {
                             )}
                           >
                             <p className="text-sm">{msg.text}</p>
-                            {msg.poll && (
+                            {msg.pollId && (
                               <Card className="mt-2 p-3">
-                                <p className="text-sm font-medium mb-1">{msg.poll.title}</p>
+                                <p className="text-sm font-medium mb-1">Poll attached</p>
                                 <Button
                                   variant="secondary"
                                   size="sm"
-                                  onClick={() => setSelectedPoll(msg.poll as PollWithVotes)}
+                                  onClick={() => {
+                                    const poll = polls.find(p => p.$id === msg.pollId);
+                                    if (poll) setSelectedPoll(poll);
+                                  }}
                                 >
                                   View Poll
                                 </Button>
@@ -299,8 +537,8 @@ export default function GroupChat() {
                                 <Badge
                                   key={emoji}
                                   variant="secondary"
-                                  className="text-xs px-2 py-0 h-6 cursor-pointer hover-elevate"
-                                  onClick={() => handleReaction(msg.id, emoji)}
+                                  className="text-xs px-2 py-0 h-6 cursor-pointer hover:bg-secondary/80"
+                                  onClick={() => handleReaction(msg.$id, emoji)}
                                 >
                                   {emoji} {count}
                                 </Badge>
@@ -317,7 +555,7 @@ export default function GroupChat() {
                               <PopoverContent className="w-auto p-0 border-0" align={isOwn ? "end" : "start"}>
                                 <Picker
                                   data={data}
-                                  onEmojiSelect={(emoji: any) => handleReaction(msg.id, emoji.native)}
+                                  onEmojiSelect={(emoji: any) => handleReaction(msg.$id, emoji.native)}
                                   theme={document.documentElement.classList.contains("dark") ? "dark" : "light"}
                                 />
                               </PopoverContent>
@@ -421,7 +659,7 @@ export default function GroupChat() {
                         key={choice}
                         variant={isSelected ? "default" : variant}
                         className="w-full justify-between"
-                        onClick={() => handleVote(activePoll.id, choice)}
+                        onClick={() => handleVote(activePoll.$id, choice)}
                         data-testid={`button-vote-${choice}`}
                       >
                         <span className="flex items-center gap-2">
