@@ -40,6 +40,24 @@ import { databases, client, DATABASE_ID, COLLECTIONS } from "@/lib/appwrite";
 import { ID, Query } from "appwrite";
 import { handlePlanbotCommand } from "@/lib/planbot";
 
+interface MovieResult {
+  id: number;
+  title: string;
+  overview: string;
+  poster_path: string;
+  release_date: string;
+  vote_average: number;
+}
+
+interface PlaceResult {
+  place_id: string;
+  name: string;
+  formatted_address: string;
+  photos?: Array<{ photo_reference: string }>;
+  rating?: number;
+  types?: string[];
+}
+
 // Interfaces
 interface Group {
   $id: string;
@@ -746,19 +764,22 @@ export default function GroupChat() {
                 
                 <div className="space-y-2">
                   {[
-                    { choice: "join", label: "Join", icon: ThumbsUp, variant: "default" as const },
-                    { choice: "maybe", label: "Maybe", icon: Minus, variant: "secondary" as const },
-                    { choice: "no", label: "Not Joining", icon: ThumbsDown, variant: "outline" as const },
-                  ].map(({ choice, label, icon: Icon, variant }) => {
+                    { choice: "join", label: "Join", icon: ThumbsUp, color: "bg-green-500 text-white" },
+                    { choice: "maybe", label: "Maybe", icon: Minus, color: "bg-blue-500 text-white" },
+                    { choice: "no", label: "Not Joining", icon: ThumbsDown, color: "bg-red-500 text-white" },
+                  ].map(({ choice, label, icon: Icon, color }) => {
                     const counts = getVoteCounts(activePoll);
                     const voted = userVote(activePoll);
                     const isSelected = voted?.choice === choice;
-                    
+
                     return (
                       <Button
                         key={choice}
-                        variant={isSelected ? "default" : variant}
-                        className="w-full justify-between"
+                        variant="default"
+                        className={cn(
+                          "w-full justify-between",
+                          isSelected ? color : "bg-gray-200 text-gray-800 hover:bg-gray-300"
+                        )}
                         onClick={() => handleVote(activePoll.$id, choice)}
                         data-testid={`button-vote-${choice}`}
                       >
@@ -809,14 +830,58 @@ export default function GroupChat() {
               {selectedPoll.description && (
                 <p className="text-sm">{selectedPoll.description}</p>
               )}
-              {selectedPoll.metadata && typeof selectedPoll.metadata === 'object' && (
-                <div className="text-sm space-y-1">
-                  {Object.entries(selectedPoll.metadata as Record<string, any>).map(([key, value]) => (
-                    <p key={key}>
-                      <span className="font-medium capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}: </span>
-                      {Array.isArray(value) ? value.join(', ') : String(value)}
-                    </p>
-                  ))}
+              {selectedPoll && selectedPoll.metadata && (
+                <div className="space-y-4 text-sm">
+                  {selectedPoll.type === "movie" && (
+                    (() => {
+                      const movie: MovieResult = selectedPoll.metadata as MovieResult;
+                      return (
+                        <div className="flex flex-col md:flex-row gap-4">
+                          {movie.poster_path && (
+                            <img
+                              src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`}
+                              alt={movie.title}
+                              className="w-full md:w-48 rounded-lg"
+                            />
+                          )}
+                          <div className="flex-1 space-y-2">
+                            <h4 className="font-semibold text-lg">{movie.title}</h4>
+                            <p className="text-muted-foreground">{movie.overview}</p>
+                            <p><span className="font-medium">Release Date:</span> {movie.release_date}</p>
+                            <p><span className="font-medium">Rating:</span> {movie.vote_average}/10</p>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
+
+                  {selectedPoll.type === "place" && (() => {
+                    if (!selectedPoll.metadata) return null;
+
+                    // Ensure TS sees it as a string
+                    const metadataStr = selectedPoll.metadata as unknown as string;
+
+                    // Parse JSON string into object
+                    const place = JSON.parse(metadataStr) as PlaceResult & { latitude: number; longitude: number };
+                    
+                    if (!place.latitude || !place.longitude) return <p>Location not available</p>;
+
+                    return (
+                      <div className="flex flex-col md:flex-row gap-4">
+                        {/* <img
+                          src={`https://static-maps.yandex.ru/1.x/?lang=en_US&ll=${place.longitude},${place.latitude}&size=400,300&z=15&l=map&pt=${place.longitude},${place.latitude},pm2rdm`}
+                          alt={place.name}
+                          className="w-full md:w-48 rounded-lg"
+                        /> */}
+                        <div className="flex-1 space-y-2">
+                          <h4 className="font-semibold text-lg">{place.name}</h4>
+                          <p className="text-muted-foreground">{place.formatted_address}</p>
+                          {/* {place.rating && <p><span className="font-medium">Rating:</span> {place.rating}</p>} */}
+                          {place.types && <p><span className="font-medium">Types:</span> {place.types.join(", ")}</p>}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>

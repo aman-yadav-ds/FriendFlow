@@ -343,6 +343,8 @@ export default function PollCreation() {
         metadata: JSON.stringify({
           rating: place.rating || 0,
           types: place.types || [],
+          longitude: place.formatted_address.split(", ")[0],
+          latitude: place.formatted_address.split(", ")[1],
         }),
       };
 

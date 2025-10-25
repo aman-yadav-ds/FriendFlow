@@ -23,6 +23,7 @@ interface Group {
   name: string;
   members: string[];
   creatorId: string;
+  creatorName: string; // Added for typing
   lastMessage?: string;
   activeMembers?: string[];
   unseenMessages?: number;
@@ -135,6 +136,7 @@ export default function Dashboard() {
           name: newGroupName,
           members: [user!.$id],
           creatorId: user!.$id,
+          creatorName: user!.name,
           lastMessage: JSON.stringify({ text: "", timestamp: Date.now() }),
           inviteCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
         },
@@ -417,7 +419,6 @@ export default function Dashboard() {
         ) : filteredGroups.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredGroups.map((group, index) => {
-              const members = group.members || "[]";
               const lastMessageObj = group.lastMessage ? JSON.parse(group.lastMessage) : null;
 
               return (
@@ -445,7 +446,7 @@ export default function Dashboard() {
                           {group.name}
                         </CardTitle>
                         <CardDescription className="text-sm text-muted-foreground">
-                          Created by {group.creatorId === user?.$id ? "you" : group.creatorId}
+                          Created by {group.creatorId === user?.$id ? "you" : group.creatorName}
                         </CardDescription>
                       </div>
 
@@ -465,7 +466,7 @@ export default function Dashboard() {
 
                     <CardContent className="space-y-4 pt-0">
                       {/* Member Avatars */}
-                      <div className="flex -space-x-2 overflow-hidden">
+                      {/* <div className="flex -space-x-2 overflow-hidden">
                         {group.members?.slice(0, 5).map((memberId) => {
                           const isActive = group.activeMembers?.includes(memberId);
                           return (
@@ -484,7 +485,7 @@ export default function Dashboard() {
                             +{group.members.length - 5}
                           </div>
                         )}
-                      </div>
+                      </div> */}
 
                       {/* Stats Row */}
                       <div className="grid grid-cols-3 text-center text-sm text-muted-foreground">
