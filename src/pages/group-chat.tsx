@@ -57,7 +57,6 @@ interface Message {
   senderAvatar?: string;
   text: string;
   createdAt: string;
-  reactions?: Array<{ userId: string; emoji: string }>;
   pollId?: string;
   isSystemMessage?: boolean; // <-- ADDED
 }
