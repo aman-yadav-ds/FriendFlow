@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { databases } from "@/lib/appwrite";
-import { Permission, Query, Role, ID } from "appwrite"; // Added ID
+import { Permission, Query, Role, ID } from "appwrite";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,24 +12,24 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Users, Plus, Search, LogOut, User as UserIcon, MessageCircle, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
+import NotificationsPanel from "@/pages/notifications";
 import { motion } from "framer-motion";
 
 const DATABASE_ID = import.meta.env.VITE_APPWRITE_DATABASE_ID!;
 const COLLECTION_ID = "groups";
-const COLLECTION_ID_MESSAGES = "messages"; // Added for system messages
+const COLLECTION_ID_MESSAGES = "messages";
 
 interface Group {
   $id: string;
   name: string;
   members: string[];
   creatorId: string;
-  creatorName: string; // Added for typing
+  creatorName: string;
   lastMessage?: string;
   activeMembers?: string[];
   unseenMessages?: number;
-  inviteCode?: string; // Added for typing
+  inviteCode?: string;
 }
-
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
@@ -43,7 +43,7 @@ export default function Dashboard() {
   const [isCreating, setIsCreating] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
-  // --- New State for Joining Groups ---
+  // New State for Joining Groups
   const [joinDialogOpen, setJoinDialogOpen] = useState(false);
   const [joinInviteCode, setJoinInviteCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
@@ -58,7 +58,6 @@ export default function Dashboard() {
 
     setIsLoading(true);
     try {
-      
       const response = await databases.listDocuments(DATABASE_ID, COLLECTION_ID, [
         Query.or([
           Query.equal("creatorId", user.$id),
@@ -66,7 +65,6 @@ export default function Dashboard() {
         ]),
       ]);
       setGroups(response.documents as unknown as Group[]);
-
     } catch (err: any) {
       // Don't show error if user is not authorized (likely logged out)
       if (err.code === 401 || err.type === 'user_unauthorized') {
@@ -84,7 +82,6 @@ export default function Dashboard() {
       setIsLoading(false);
     }
   };
-
 
   useEffect(() => {
     // Only fetch if user is logged in
@@ -123,15 +120,14 @@ export default function Dashboard() {
   // Create a new group
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newGroupName.trim() || !user) return; // Added user check
+    if (!newGroupName.trim() || !user) return;
 
     setIsCreating(true);
     try {
-      // Create group document with proper permissions
       await databases.createDocument(
         DATABASE_ID,
         COLLECTION_ID,
-        "unique()", // document ID
+        "unique()",
         {
           name: newGroupName,
           members: [user!.$id],
@@ -140,20 +136,12 @@ export default function Dashboard() {
           lastMessage: JSON.stringify({ text: "", timestamp: Date.now() }),
           inviteCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
         },
-        // --- PERMISSIONS MODIFIED ---
-        // This is required for your "Join Group" flow to work client-side.
-        // 1. (Read) Any authenticated user can find this group by its invite code.
-        // 2. (Update) Any authenticated user can update this doc (e.g., add themselves to the 'members' array).
-        // 3. (Delete) Only the creator can delete the group.
-        // A more secure way would use an Appwrite Function for joining,
-        // which avoids giving global update permission.
         [
           Permission.read(Role.users()),
           Permission.update(Role.users()),
           Permission.delete(Role.user(user!.$id)),
         ]
       );
-
 
       toast({ title: "Group created!", description: `${newGroupName} is ready.` });
       setNewGroupName("");
@@ -171,7 +159,7 @@ export default function Dashboard() {
     }
   };
 
-  // --- New Function to Join a Group ---
+  // Join a Group
   const handleJoinGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!joinInviteCode.trim() || !user) return;
@@ -226,7 +214,7 @@ export default function Dashboard() {
           senderId: "system",
           senderName: "System",
           text: `${user.name} has joined the group.`,
-          isSystemMessage: true, // Mark as system message
+          isSystemMessage: true,
         }
       );
 
@@ -237,7 +225,7 @@ export default function Dashboard() {
       
       setJoinInviteCode("");
       setJoinDialogOpen(false);
-      fetchGroups(); // Refresh the user's group list
+      fetchGroups();
 
     } catch (err) {
       console.error("Error joining group:", err);
@@ -251,10 +239,8 @@ export default function Dashboard() {
     }
   };
 
-
   const handleDeleteGroup = async (groupId: string) => {
     try {
-      // Attempt to delete the document
       await databases.deleteDocument(DATABASE_ID, COLLECTION_ID, groupId);
 
       toast({
@@ -262,10 +248,8 @@ export default function Dashboard() {
         description: "Your group has been successfully deleted.",
       });
 
-      // Refresh the group list
       fetchGroups();
     } catch (err: any) {
-      // Appwrite will throw an error if the current user lacks permission
       toast({
         variant: "destructive",
         title: "Failed to delete group",
@@ -281,14 +265,6 @@ export default function Dashboard() {
     group.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const getInitials = (name: string) =>
-    name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
-
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -301,6 +277,8 @@ export default function Dashboard() {
             <h1 className="text-xl font-bold font-display">FriendFlow</h1>
           </div>
           <div className="flex items-center gap-2">
+            {/* Notifications Panel - NEW */}
+            <NotificationsPanel />
             <ThemeToggle />
             <Button variant="ghost" size="icon" onClick={() => setLocation("/profile")}>
               <UserIcon className="h-5 w-5" />
@@ -335,9 +313,8 @@ export default function Dashboard() {
             />
           </div>
 
-          {/* --- Updated Button Container --- */}
           <div className="flex gap-2">
-            {/* --- Join Group Dialog --- */}
+            {/* Join Group Dialog */}
             <Dialog open={joinDialogOpen} onOpenChange={setJoinDialogOpen}>
               <DialogTrigger asChild>
                 <Button variant="outline">
@@ -374,7 +351,7 @@ export default function Dashboard() {
               </DialogContent>
             </Dialog>
 
-            {/* --- New Group Dialog --- */}
+            {/* New Group Dialog */}
             <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
               <DialogTrigger asChild>
                 <Button>
@@ -415,120 +392,100 @@ export default function Dashboard() {
 
         {/* Groups Grid */}
         {isLoading ? (
-          <div>Loading...</div>
+          <div className="flex items-center justify-center py-16">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+          </div>
         ) : filteredGroups.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredGroups.map((group, index) => {
-              const lastMessageObj = group.lastMessage ? JSON.parse(group.lastMessage) : null;
-
-              return (
-                <motion.div
-                  key={group.$id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: index * 0.05 }}
+            {filteredGroups.map((group, index) => (
+              <motion.div
+                key={group.$id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: index * 0.05 }}
+              >
+                <Card
+                  onClick={() => setLocation(`/groups/${group.$id}`)}
+                  className="hover:shadow-lg transition-all duration-200 cursor-pointer rounded-2xl border bg-card/80 backdrop-blur-sm relative"
                 >
-                  <Card
-                    onClick={() => setLocation(`/groups/${group.$id}`)}
-                    className="hover:shadow-lg transition-all duration-200 cursor-pointer rounded-2xl border bg-card/80 backdrop-blur-sm relative"
-                  >
-                    {/* Unseen Message Badge */}
-                    {group.unseenMessages && group.unseenMessages > 0 && (
-                      <div className="absolute top-3 right-3 bg-primary text-primary-foreground text-xs font-medium px-2 py-1 rounded-full shadow-sm">
-                        {group.unseenMessages} new
+                  {/* Unseen Message Badge */}
+                  {group.unseenMessages && group.unseenMessages > 0 && (
+                    <div className="absolute top-3 right-3 bg-primary text-primary-foreground text-xs font-medium px-2 py-1 rounded-full shadow-sm">
+                      {group.unseenMessages} new
+                    </div>
+                  )}
+
+                  <CardHeader className="flex flex-row justify-between items-start pb-2">
+                    <div>
+                      <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                        <Users className="h-4 w-4 text-primary" />
+                        {group.name}
+                      </CardTitle>
+                      <CardDescription className="text-sm text-muted-foreground">
+                        Created by {group.creatorId === user?.$id ? "you" : group.creatorName}
+                      </CardDescription>
+                    </div>
+
+                    {user?.$id === group.creatorId && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteGroup(group.$id);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
+                      </Button>
+                    )}
+                  </CardHeader>
+
+                  <CardContent className="space-y-4 w-full pt-0">
+                    {/* Stats Row */}
+                    <div className="grid grid-cols-3 text-center text-sm text-muted-foreground">
+                      <div>
+                        <p>Total</p>
+                        <p className="text-foreground font-medium">{group.members?.length || 0}</p>
+                      </div>
+                      <div>
+                        <p>Active</p>
+                        <p className="text-green-600 font-medium">{group.activeMembers?.length || 0}</p>
+                      </div>
+                      <div>
+                        <p>Unseen</p>
+                        <p className="text-blue-600 font-medium">{group.unseenMessages || 0}</p>
+                      </div>
+                    </div>
+
+                    {/* Last Message */}
+                    {group.lastMessage && (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground border-t pt-2">
+                        <MessageCircle className="h-3 w-3" />
+                        <span className="truncate">
+                          {JSON.parse(group.lastMessage)?.text || ""}
+                        </span>
                       </div>
                     )}
-
-                    <CardHeader className="flex flex-row justify-between items-start pb-2">
-                      <div>
-                        <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                          <Users className="h-4 w-4 text-primary" />
-                          {group.name}
-                        </CardTitle>
-                        <CardDescription className="text-sm text-muted-foreground">
-                          Created by {group.creatorId === user?.$id ? "you" : group.creatorName}
-                        </CardDescription>
-                      </div>
-
-                      {user?.$id === group.creatorId && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteGroup(group.$id);
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
-                        </Button>
-                      )}
-                    </CardHeader>
-
-                    <CardContent className="space-y-4 pt-0">
-                      {/* Member Avatars */}
-                      {/* <div className="flex -space-x-2 overflow-hidden">
-                        {group.members?.slice(0, 5).map((memberId) => {
-                          const isActive = group.activeMembers?.includes(memberId);
-                          return (
-                            <div key={memberId} className="relative">
-                              <Avatar className="h-8 w-8 border-2 border-background">
-                                <AvatarFallback>{memberId.slice(0, 2).toUpperCase()}</AvatarFallback>
-                              </Avatar>
-                              {isActive && (
-                                <span className="absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-background"></span>
-                              )}
-                            </div>
-                          );
-                        })}
-                        {group.members?.length > 5 && (
-                          <div className="h-8 w-8 rounded-full border-2 border-background bg-muted flex items-center justify-center text-xs font-medium">
-                            +{group.members.length - 5}
-                          </div>
-                        )}
-                      </div> */}
-
-                      {/* Stats Row */}
-                      <div className="grid grid-cols-3 text-center text-sm text-muted-foreground">
-                        <div>
-                          <p>Total</p>
-                          <p className="text-foreground font-medium">{group.members?.length || 0}</p>
-                        </div>
-                        <div>
-                          <p>Active</p>
-                          <p className="text-green-600 font-medium">{group.activeMembers?.length || 0}</p>
-                        </div>
-                        <div>
-                          <p>Unseen</p>
-                          <p className="text-blue-600 font-medium">{group.unseenMessages || 0}</p>
-                        </div>
-                      </div>
-
-                      {/* Last Message */}
-                      {group.lastMessage && (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground border-t pt-2">
-                          <MessageCircle className="h-3 w-3" />
-                          <span className="truncate">
-                            {JSON.parse(group.lastMessage)?.text || ""}
-                          </span>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              );
-            })}
+                  </CardContent>
+                </Card>
+              </motion.div>
+            ))}
           </div>
         ) : (
           <div className="text-center py-16">
             <Users className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
             <h3 className="text-lg font-semibold mb-2">No groups yet</h3>
             <p className="text-muted-foreground mb-6">
-              Create your first group to start planning events
+              {searchQuery 
+                ? "No groups match your search" 
+                : "Create your first group to start planning events"}
             </p>
-            <Button onClick={() => setCreateDialogOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Create Your First Group
-            </Button>
+            {!searchQuery && (
+              <Button onClick={() => setCreateDialogOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Create Your First Group
+              </Button>
+            )}
           </div>
         )}
       </main>

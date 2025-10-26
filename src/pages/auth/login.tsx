@@ -119,6 +119,10 @@ export default function Login() {
             </p>
           </CardFooter>
         </Card>
+
+        <div className="absolute bottom-0 right-0 p-2 text-lg text-muted-foreground">
+          Team Snackoverflow
+        </div>
       </motion.div>
     </div>
   );
