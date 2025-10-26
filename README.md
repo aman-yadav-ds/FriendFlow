@@ -77,7 +77,7 @@ The backend is powered by Appwrite. Here are the collections and their important
 
 ## Getting Started
 
-### Prerequisites
+### Requirements
 
 - Node.js (v18 or higher)
 - An Appwrite instance
@@ -150,7 +150,10 @@ PlanBot is your AI assistant for effortless planning. To use it, type commands s
 
 - **/plan [activity]**: Kicks off the planning process.
   - **Example**: `/plan cafe`
-  - **What it does**: PlanBot analyzes the recent chat history to understand your group's preferences (e.g., "a quiet spot," "good WiFi"). It then finds local cafes, ranks them based on those preferences, and creates a poll with the top 3 AI-recommended options.
+  - **What it does**: PlanBot analyzes the recent chat history to understand your group's preferences (e.g., "a quiet spot," "good WiFi"). It then finds local cafes using OpenStreetMap, ranks them based on those preferences, and creates a poll with the top 3 AI-recommended options.
+- **/plan movie**: Helps the group decide on a movie to watch.
+  - **Example**: `/plan movie`
+  - **What it does**: The bot analyzes the chat for genre preferences (e.g., "a comedy," "something with action") and checks members' profiles for their favorite genres. It then uses the TMDB API to find matching movies and creates a poll with the top suggestions.
 - **/when [date/time]**: Helps the group decide on the best time to meet.
   - **Example**: `/when tomorrow at 8pm`
   - **What it does**: Creates a poll with several time slots around the suggested time for the group to vote on.
@@ -174,7 +177,7 @@ Customize your profile to let your friends know more about you.
 
 ## Deployment
 
-This project is configured for easy deployment to modern hosting platforms like Vercel and Netlify.
+This project is configured for easy deployment to Vercel.
 
 ### Deploying with Vercel
 
@@ -185,14 +188,3 @@ This project is configured for easy deployment to modern hosting platforms like 
 5. Before deploying, go to the **"Settings" > "Environment Variables"** tab for the project.
 6. Add all the necessary environment variables from your `.env` file (e.g., `VITE_APPWRITE_ENDPOINT`, `VITE_APPWRITE_PROJECT_ID`, etc.).
 7. Click **"Deploy"**. Vercel will build and deploy your site.
-
-### Deploying with Netlify
-
-1. **Fork this repository** to your own GitHub account.
-2. Go to your [Netlify Team Dashboard](https://app.netlify.com) and click **"Add new site > Import an existing project"**.
-3. **Connect to GitHub** and authorize Netlify to access your repositories.
-4. **Select** the forked repository.
-5. Netlify will detect the Vite configuration. The build command should be `npm run build` and the publish directory should be `dist`.
-6. Before deploying, go to **"Site settings" > "Build & deploy" > "Environment"**.
-7. Add all the necessary environment variables from your `.env` file.
-8. Click **"Deploy site"**.
