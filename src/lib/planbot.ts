@@ -21,8 +21,23 @@ interface PlaceResult {
   lon?: number;
 }
 
-// Store selected cafe per group (in-memory for this session)
-const selectedCafes: Map<string, PlaceResult> = new Map();
+interface MovieResult {
+  id: number;
+  title: string;
+  overview: string;
+  poster_path: string;
+  release_date: string;
+  vote_average: number;
+  genre_ids?: number[];
+}
+
+// Store selected items per group (in-memory for this session)
+const selectedItems: Map<string, PlaceResult | MovieResult> = new Map();
+const searchResults: Map<string, (PlaceResult | MovieResult)[]> = new Map();
+
+// TMDB API configuration
+const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY;
+const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
 async function sendSystemMessage(groupId: string, text: string) {
   await databases.createDocument(
@@ -169,11 +184,87 @@ async function searchPlaces(location: string, category: string = "cafe"): Promis
   }
 }
 
-async function suggestCafes(groupId: string, args: string[]): Promise<void> {
+async function getUserGenres(userId: string): Promise<string[]> {
+  try {
+    const response = await databases.listDocuments(
+      DATABASE_ID,
+      COLLECTIONS.USERS,
+      [Query.equal('userId', userId)]
+    );
+
+    if (response.documents.length > 0) {
+      const userDoc = response.documents[0];
+      return userDoc.genres || [];
+    }
+    return [];
+  } catch (error) {
+    console.error("Error fetching user genres:", error);
+    return [];
+  }
+}
+
+async function searchMoviesByGenres(genres: string[]): Promise<MovieResult[]> {
+  if (!TMDB_API_KEY) {
+    throw new Error("TMDB API key is not configured");
+  }
+
+  try {
+    // Get genre IDs from TMDB
+    const genreResponse = await fetch(
+      `${TMDB_BASE_URL}/genre/movie/list?api_key=${TMDB_API_KEY}&language=en-US`
+    );
+    
+    if (!genreResponse.ok) {
+      throw new Error("Failed to fetch genre list");
+    }
+
+    const genreData = await genreResponse.json();
+    const genreMap = new Map(
+      genreData.genres.map((g: any) => [g.name.toLowerCase(), g.id])
+    );
+
+    // Convert user genres to TMDB genre IDs
+    const genreIds = genres
+      .map(g => genreMap.get(g.toLowerCase()))
+      .filter(Boolean);
+
+    if (genreIds.length === 0) {
+      // If no matching genres, get popular movies
+      const response = await fetch(
+        `${TMDB_BASE_URL}/movie/popular?api_key=${TMDB_API_KEY}&language=en-US&page=1`
+      );
+      
+      if (!response.ok) {
+        throw new Error("Failed to fetch movies");
+      }
+
+      const data = await response.json();
+      return data.results.slice(0, 5);
+    }
+
+    // Discover movies by genres
+    const genreQuery = genreIds.join(',');
+    const response = await fetch(
+      `${TMDB_BASE_URL}/discover/movie?api_key=${TMDB_API_KEY}&language=en-US&sort_by=popularity.desc&include_adult=false&with_genres=${genreQuery}&page=1`
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch movies");
+    }
+
+    const data = await response.json();
+    return data.results.slice(0, 5);
+  } catch (error) {
+    console.error("Movie search error:", error);
+    throw error;
+  }
+}
+
+async function suggestOutings(groupId: string, args: string[]): Promise<void> {
   if (args.length < 2) {
     await sendSystemMessage(
       groupId, 
-      "❌ Usage: /plan <area> <city> [category]\nExample: /plan whitefield bangalore cafe"
+      "❌ Usage: /planOutings <area> <city> [category]\nExample: /planOutings whitefield bangalore cafe"
     );
     return;
   }
@@ -203,11 +294,11 @@ async function suggestCafes(groupId: string, args: string[]): Promise<void> {
     
     await sendSystemMessage(
       groupId, 
-      `✅ Top ${category} suggestions in ${location}:\n\n${lines.join("\n\n")}\n\n💡 Use **/select <cafe name>** to choose one, then **/when** to set date/time.`
+      `✅ Top ${category} suggestions in ${location}:\n\n${lines.join("\n\n")}\n\n💡 Use **/select <name>** to choose one, then **/when** to set date/time.`
     );
 
     // Store the search results for this group
-    selectedCafes.set(`${groupId}_results`, { place_id: '', name: '', formatted_address: '', types: top.map(p => JSON.stringify(p)) });
+    searchResults.set(groupId, top);
     
   } catch (e) {
     await sendSystemMessage(
@@ -217,40 +308,109 @@ async function suggestCafes(groupId: string, args: string[]): Promise<void> {
   }
 }
 
-async function selectCafe(groupId: string, args: string[]): Promise<void> {
+async function suggestMovies(groupId: string, userId: string, userName: string): Promise<void> {
+  await sendSystemMessage(groupId, `🎬 Finding movie recommendations based on your preferences...`);
+
+  try {
+    // Get user's favorite genres
+    const userGenres = await getUserGenres(userId);
+    
+    if (userGenres.length === 0) {
+      await sendSystemMessage(
+        groupId,
+        `❌ No favorite genres found in your profile. Please update your genres in Profile settings first!\n\n💡 Go to Profile → Add your favorite genres → Save`
+      );
+      return;
+    }
+
+    const movies = await searchMoviesByGenres(userGenres);
+    
+    if (movies.length === 0) {
+      await sendSystemMessage(
+        groupId,
+        `❌ No movies found. Try updating your genre preferences.`
+      );
+      return;
+    }
+
+    const lines = movies.map((m: MovieResult, i: number) => 
+      `${i + 1}. **${m.title}** (${m.release_date?.split("-")[0] || "N/A"})${m.vote_average ? ` ⭐ ${m.vote_average.toFixed(1)}` : ""}\n   ${m.overview ? m.overview.substring(0, 100) + "..." : ""}`
+    );
+    
+    await sendSystemMessage(
+      groupId,
+      `✅ Top movie recommendations for ${userName} (based on: ${userGenres.join(", ")}):\n\n${lines.join("\n\n")}\n\n💡 Use **/select <movie title>** to choose one, then **/when** to set date/time.`
+    );
+
+    // Store the search results for this group
+    searchResults.set(groupId, movies);
+    
+  } catch (e) {
+    await sendSystemMessage(
+      groupId,
+      `❌ Failed to fetch movie suggestions. ${e instanceof Error ? e.message : ""}`
+    );
+  }
+}
+
+async function selectItem(groupId: string, args: string[]): Promise<void> {
   if (args.length === 0) {
-    await sendSystemMessage(groupId, "❌ Usage: /select <cafe name>\nExample: /select Third Wave Coffee");
+    await sendSystemMessage(groupId, "❌ Usage: /select <name>\nExample: /select Third Wave Coffee");
     return;
   }
 
-  const cafeName = args.join(" ").toLowerCase();
-  const resultsKey = `${groupId}_results`;
-  const results = selectedCafes.get(resultsKey);
+  const itemName = args.join(" ").toLowerCase();
+  const results = searchResults.get(groupId);
 
-  if (!results || !results.types) {
-    await sendSystemMessage(groupId, "❌ No search results available. Run **/plan** first.");
+  if (!results || results.length === 0) {
+    await sendSystemMessage(groupId, "❌ No search results available. Run **/planOutings** or **/planMovies** first.");
     return;
   }
 
-  // Parse stored results
-  const places: PlaceResult[] = results.types.map(t => JSON.parse(t));
-  const selected = places.find(p => p.name.toLowerCase().includes(cafeName));
+  // Check if it's a movie or place result
+  const isMovie = 'title' in results[0];
+  
+  let selected: PlaceResult | MovieResult | undefined;
+  
+  if (isMovie) {
+    selected = (results as MovieResult[]).find(m => 
+      m.title.toLowerCase().includes(itemName)
+    );
+  } else {
+    selected = (results as PlaceResult[]).find(p => 
+      p.name.toLowerCase().includes(itemName)
+    );
+  }
 
   if (!selected) {
+    const optionsList = results.map((item, i) => {
+      const name = 'title' in item ? item.title : item.name;
+      return `${i + 1}. ${name}`;
+    }).join("\n");
+    
     await sendSystemMessage(
-      groupId, 
-      `❌ Cafe not found. Available options:\n${places.map((p, i) => `${i + 1}. ${p.name}`).join("\n")}`
+      groupId,
+      `❌ Item not found. Available options:\n${optionsList}`
     );
     return;
   }
 
-  // Store selected cafe
-  selectedCafes.set(groupId, selected);
+  // Store selected item
+  selectedItems.set(groupId, selected);
   
-  await sendSystemMessage(
-    groupId, 
-    `✅ Selected: **${selected.name}**\n📍 ${selected.formatted_address}\n\n💡 Use **/when YYYY-MM-DD HH:MM** to set date and time.`
-  );
+  if ('title' in selected) {
+    // Movie selected
+    await sendSystemMessage(
+      groupId,
+      `✅ Selected: **${selected.title}** (${selected.release_date?.split("-")[0] || "N/A"})\n⭐ Rating: ${selected.vote_average?.toFixed(1) || "N/A"}\n\n💡 Use **/when YYYY-MM-DD HH:MM** to set date and time.`
+    );
+  } else {
+    // Place selected
+    await sendSystemMessage(
+      groupId,
+      `✅ Selected: **${selected.name}**\n📍 ${selected.formatted_address}\n\n💡 Use **/when YYYY-MM-DD HH:MM** to set date and time.`
+    );
+  }
 }
 
 function parseDateTime(args: string[]): { date?: string; time?: string } {
@@ -266,10 +426,10 @@ function parseDateTime(args: string[]): { date?: string; time?: string } {
 }
 
 async function attachWhen(groupId: string, args: string[], currentUser: { $id: string; name: string; avatar?: string }): Promise<void> {
-  const selected = selectedCafes.get(groupId);
+  const selected = selectedItems.get(groupId);
   
   if (!selected) {
-    await sendSystemMessage(groupId, "❌ No cafe selected. Use **/select <cafe name>** first.");
+    await sendSystemMessage(groupId, "❌ No item selected. Use **/select <name>** first.");
     return;
   }
 
@@ -277,7 +437,7 @@ async function attachWhen(groupId: string, args: string[], currentUser: { $id: s
   
   if (!date || !time) {
     await sendSystemMessage(
-      groupId, 
+      groupId,
       "❌ Usage: /when YYYY-MM-DD HH:MM\nExample: /when 2025-10-30 19:30"
     );
     return;
@@ -300,17 +460,51 @@ async function attachWhen(groupId: string, args: string[], currentUser: { $id: s
       );
     }
 
-    // Create new poll
-    const metadata = {
-      date,
-      time,
-      rating: selected.rating || 0,
-      types: selected.types || [],
-      source: "planbot",
-      latitude: selected.lat,
-      longitude: selected.lon,
-    };
+    // Determine if it's a movie or place
+    const isMovie = 'title' in selected;
+    const pollType = isMovie ? "movie" : "place";
+    
+    let metadata: any;
+    let title: string;
+    let description: string;
+    let externalId: string;
+    let image: string;
 
+    if (isMovie) {
+      const movie = selected as MovieResult;
+      title = movie.title;
+      description = movie.overview || "";
+      externalId = movie.id.toString();
+      image = movie.poster_path
+        ? `https://image.tmdb.org/t/p/w500${movie.poster_path}`
+        : "";
+      
+      metadata = {
+        date,
+        time,
+        releaseDate: movie.release_date,
+        rating: movie.vote_average,
+        source: "planbot",
+      };
+    } else {
+      const place = selected as PlaceResult;
+      title = place.name;
+      description = place.formatted_address;
+      externalId = place.place_id;
+      image = "";
+      
+      metadata = {
+        date,
+        time,
+        rating: place.rating || 0,
+        types: place.types || [],
+        source: "planbot",
+        latitude: place.lat,
+        longitude: place.lon,
+      };
+    }
+
+    // Create new poll
     const newPoll = await databases.createDocument(
       DATABASE_ID,
       COLLECTIONS.POLLS,
@@ -319,18 +513,18 @@ async function attachWhen(groupId: string, args: string[], currentUser: { $id: s
         groupId,
         creatorId: currentUser.$id,
         creatorName: currentUser.name,
-        type: "place",
-        externalId: selected.place_id,
-        title: selected.name,
-        description: selected.formatted_address,
-        image: "",
+        type: pollType,
+        externalId: externalId,
+        title: title,
+        description: description,
+        image: image,
         choices: ["join", "maybe", "no"],
         active: true,
         metadata: JSON.stringify(metadata),
       }
     );
 
-    // Create a message in the group chat announcing the poll (like the New Poll button does)
+    // Create a message in the group chat announcing the poll
     await databases.createDocument(
       DATABASE_ID,
       COLLECTIONS.MESSAGES,
@@ -340,23 +534,24 @@ async function attachWhen(groupId: string, args: string[], currentUser: { $id: s
         senderId: currentUser.$id,
         senderName: currentUser.name,
         senderAvatar: currentUser.avatar || "",
-        text: `📊 New poll created: ${selected.name}`,
+        text: `📊 New poll created: ${title}`,
         pollId: newPoll.$id,
       }
     );
 
+    const emoji = isMovie ? "🎬" : "🪴";
     await sendSystemMessage(
-      groupId, 
-      `📅 **Poll Created!**\n\n🏪 **${selected.name}**\n📍 ${selected.formatted_address}\n📆 Date: ${date}\n⏰ Time: ${time}\n\n👥 Vote Join/Maybe/No in the sidebar!`
+      groupId,
+      `📅 **Poll Created!**\n\n${emoji} **${title}**\n${description ? `📍 ${description}\n` : ""}📆 Date: ${date}\n⏰ Time: ${time}\n\n👥 Vote Join/Maybe/No in the sidebar!`
     );
 
-    // Clear selected cafe after creating poll
-    selectedCafes.delete(groupId);
-    selectedCafes.delete(`${groupId}_results`);
+    // Clear selected item and search results after creating poll
+    selectedItems.delete(groupId);
+    searchResults.delete(groupId);
     
   } catch (error) {
     await sendSystemMessage(
-      groupId, 
+      groupId,
       `❌ Failed to create poll. ${error instanceof Error ? error.message : ""}`
     );
   }
@@ -385,9 +580,11 @@ async function rsvpSummary(groupId: string): Promise<void> {
     ? JSON.parse(active.metadata || "{}") 
     : (active.metadata || {});
 
+  const emoji = active.type === "movie" ? "🎬" : "🪴";
+  
   await sendSystemMessage(
-    groupId, 
-    `📊 **RSVP Summary**\n\n🏪 **${active.title}**\n📍 ${active.description || ""}\n${meta.date ? `📆 ${meta.date}` : ""}${meta.time ? ` ⏰ ${meta.time}` : ""}\n\n✅ Joining: ${counts.join || 0}\n🤔 Maybe: ${counts.maybe || 0}\n❌ Not joining: ${counts.no || 0}\n\n💡 Use **/lock** to finalize the plan.`
+    groupId,
+    `📊 **RSVP Summary**\n\n${emoji} **${active.title}**\n${active.description ? `📍 ${active.description}\n` : ""}${meta.date ? `📆 ${meta.date}` : ""}${meta.time ? ` ⏰ ${meta.time}` : ""}\n\n✅ Joining: ${counts.join || 0}\n🤔 Maybe: ${counts.maybe || 0}\n❌ Not joining: ${counts.no || 0}\n\n💡 Use **/lock** to finalize the plan.`
   );
 }
 
@@ -415,11 +612,13 @@ async function lockDecision(groupId: string, groupName?: string): Promise<void> 
     { active: false }
   );
 
+  const emoji = active.type === "movie" ? "🎬" : "🪴";
+  
   // Create final summary message in group
   const summary = [
     `🎉 **Plan Locked!**`,
     ``,
-    `🏪 **${active.title}**`,
+    `${emoji} **${active.title}**`,
     active.description ? `📍 ${active.description}` : "",
     meta.date ? `📆 Date: ${meta.date}` : "",
     meta.time ? `⏰ Time: ${meta.time}` : "",
@@ -437,7 +636,7 @@ async function lockDecision(groupId: string, groupName?: string): Promise<void> 
   const notificationText = [
     `🎉 Plan Confirmed!`,
     ``,
-    `🏪 ${active.title}`,
+    `${emoji} ${active.title}`,
     active.description ? `📍 ${active.description}` : "",
     meta.date ? `📆 ${meta.date}` : "",
     meta.time ? `⏰ ${meta.time}` : "",
@@ -457,6 +656,7 @@ async function lockDecision(groupId: string, groupName?: string): Promise<void> 
     date: meta.date,
     time: meta.time,
     attendees: joiners.length,
+    type: active.type,
   };
 
   // Send to all joiners
@@ -475,13 +675,17 @@ async function help(groupId: string): Promise<void> {
     [
       "🤖 **PlanBot Commands**",
       "",
-      "📍 **/plan <area> <city> [category]**",
-      "   Example: /plan whitefield bangalore cafe",
+      "🗺️ **/planOutings <area> <city> [category]**",
+      "   Example: /planOutings whitefield bangalore cafe",
       "   Search for places in a specific area",
       "",
-      "✅ **/select <cafe name>**",
+      "🎬 **/planMovies**",
+      "   Recommend movies based on your favorite genres",
+      "   (Update genres in your Profile first!)",
+      "",
+      "✅ **/select <name>**",
       "   Example: /select Third Wave Coffee",
-      "   Choose a cafe from search results",
+      "   Choose an item from search results",
       "",
       "📅 **/when YYYY-MM-DD HH:MM**",
       "   Example: /when 2025-10-30 19:30",
@@ -517,12 +721,16 @@ export async function handlePlanbotCommand(
       await help(ctx.groupId);
       return { handled: true };
       
-    case "plan":
-      await suggestCafes(ctx.groupId, args);
+    case "planoutings":
+      await suggestOutings(ctx.groupId, args);
+      return { handled: true };
+      
+    case "planmovies":
+      await suggestMovies(ctx.groupId, ctx.currentUser.$id, ctx.currentUser.name);
       return { handled: true };
       
     case "select":
-      await selectCafe(ctx.groupId, args);
+      await selectItem(ctx.groupId, args);
       return { handled: true };
       
     case "when":
@@ -539,7 +747,7 @@ export async function handlePlanbotCommand(
       
     default:
       await sendSystemMessage(
-        ctx.groupId, 
+        ctx.groupId,
         "❌ Unknown command. Use **/help** for available commands."
       );
       return { handled: true };

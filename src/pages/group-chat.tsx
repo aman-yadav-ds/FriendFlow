@@ -897,9 +897,10 @@ export default function GroupChat() {
             <DialogDescription>Type these in chat starting with '/'</DialogDescription>
           </DialogHeader>
           <div className="text-sm space-y-2">
-            <p>• /plan cafe &lt;area&gt; — suggest cafes and create an RSVP poll</p>
-            <p>• /when YYYY-MM-DD HH:MM — attach date/time to the active plan</p>
-            <p>• /rsvp — show current RSVP summary</p>
+            <p>• /planOutings &lt;area&gt; &lt;city&gt; [Category]— Suggest Places based on the area and city.</p>
+            <p>• /planMovies — Recommends Movies based on the genres in User Profile.</p>
+            <p>• /when YYYY-MM-DD HH:MM — attach date/time to the active plan and launch an Poll.</p>
+            <p>• /rsvp — show current Poll summary</p>
             <p>• /lock — lock the current plan and post the final itinerary</p>
             <p>• /help — show this help</p>
           </div>

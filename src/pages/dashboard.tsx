@@ -440,7 +440,7 @@ export default function Dashboard() {
                     )}
                   </CardHeader>
 
-                  <CardContent className="space-y-4 pt-0">
+                  <CardContent className="space-y-4 w-full pt-0">
                     {/* Stats Row */}
                     <div className="grid grid-cols-3 text-center text-sm text-muted-foreground">
                       <div>
